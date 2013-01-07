@@ -46,9 +46,8 @@ Qed.
 
 Definition Iter_n_cont n : continuous (Iter_n n).
 move => n. move => c. rewrite Iter_n_simpl.
-(*apply Ole_trans with (iter (lub c) n); first by [].*)
 apply (Ole_trans (iter_continuous c n)). simpl.
-by apply lub_mon.
+by apply: lub_mon.
 Qed.
 
 Definition ITER_n n : (D -=> D) =-> D := Eval hnf in mk_fcont (Iter_n_cont n).

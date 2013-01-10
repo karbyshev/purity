@@ -9,6 +9,7 @@
 
 Require Import ssreflect.
 Require Import ssrfun ssrbool eqtype ssrnat seq choice fintype.
+Require Import FunctionalExtensionality.
 Set Automatic Coercions Import.
 Require Import relations.
 
@@ -86,7 +87,7 @@ Lemma tree2fun2tree (t : Tree) : fun2tree (tree2fun t) = t.
 Proof.
 rewrite /fun2tree.
 elim: t => [// | i a f Hind /=].
-- f_equal. by apply: extensionality.
+- f_equal. by apply: functional_extensionality.
 Qed.
 
 Section conversion.
@@ -110,8 +111,8 @@ End conversion.
 Lemma fun2tree2fun_Cont S (F : FuncType A B C) (Hpure : isPure F) :
   @tree2funT (Cont S) (fun2tree F) = F (Cont S).
 Proof.
-apply: extensionality => q.
-apply: extensionality => a.
+extensionality q.
+extensionality a.
 suff H : Gr (conv q a) (F (Cont Tree) (tuple Que) Ans) (F (Cont S) q a); first by elim H.
 have H := @Hpure _ _ (TRacc1 q a) => {Hpure}.
 apply: H.
@@ -119,7 +120,7 @@ apply: H.
   move => a1 a1' /=; elim.
   move => h h' Hhh'.
   rewrite /Gr /conv /=.
-  f_equal. apply: extensionality => b. by firstorder.
+  f_equal. extensionality b. by firstorder.
 - by move => c c'; elim.
 Qed.
 
@@ -145,13 +146,13 @@ Lemma lem_Phi (T : monadType)
             (F : FuncType A B C) (Hpure : isPure F) :
   Phi (F (Cont (T C))) = F T.
 Proof.
-apply: extensionality; case => g.
+apply: functional_extensionality; case => g.
 rewrite /Phi -[X in _ = X]taxiom1 /=.
 have H := @Hpure _ _ (TRacc2 T) => {Hpure}.
 apply: H.
 - move => i a a'. elim. move => h h' Hhh'.
   suff Htmp: h = h'; first by rewrite Htmp.
-  by apply: extensionality => x; apply: Hhh'.
+  by extensionality x; apply: Hhh'.
 - by move => c c'; elim.
 Qed.
 

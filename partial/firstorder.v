@@ -58,19 +58,21 @@ Lemma lem_pure (g : A =-> B _BOT) :
 Proof.
 rewrite /isPure.
 move => T T' TR a a' Heq /=.
-elim: (axiom_liftCpo_dec (g a)) => [H | [b H]].
-- have H' : g a' =-= PBot by rewrite -Heq.
-  have Hmu : (mu1 (tval T B)) (g a) =-= PBot
+have E : (mu1 (tval T' B)) (g a) =-= (mu1 (tval T' B)) (g a')
+  by rewrite Heq.
+apply: (axiom_Rel_compat (Oeq_refl _) E).
+generalize (g a) => bb {a a' Heq E}.
+elim: (axiom_liftCpo_dec bb) => [H | [b H]].
+- have Hmu : (mu1 (tval T B)) bb =-= PBot
     by rewrite H mu1axiom1.
-  have Hmu' : (mu1 (tval T' B)) (g a') =-= PBot
-    by rewrite H' mu1axiom1.
+  have Hmu' : (mu1 (tval T' B)) bb =-= PBot
+    by rewrite H mu1axiom1.
   apply: (axiom_Rel_compat (Oeq_sym Hmu) (Oeq_sym Hmu')).
   by apply: StrFO.
-- have H' : g a' =-= Val b by rewrite -Heq.
-  have Hmu : (mu1 (tval T B)) (g a) =-= tval _ _ b
+- have Hmu : (mu1 (tval T B)) bb =-= tval _ _ b
     by rewrite H mu1axiom2.
-  have Hmu' : (mu1 (tval T' B)) (g a') =-= tval _ _ b
-    by rewrite H' mu1axiom2.
+  have Hmu' : (mu1 (tval T' B)) bb =-= tval _ _ b
+    by rewrite H mu1axiom2.
   apply: (axiom_Rel_compat (Oeq_sym Hmu) (Oeq_sym Hmu')).
   by apply: AccFO.
 Qed.

@@ -1,5 +1,6 @@
 Set Automatic Coercions Import.
 Require Import relations.
+Require Import PredomLiftClassical.
 
 Set Implicit Arguments.
 Unset Strict Implicit.
@@ -22,11 +23,15 @@ Definition TRtypeFO
 Definition acceptableTRFO (TR : TRtypeFO) : Prop :=
   forall (X X' : cpoType) (R : Rel X X') (x : X) (x' : X'),
     R x x' -> TR X X' R (tval T _ x) (tval T' _ x').
+
+Definition strictTRFO (TR : TRtypeFO) : Prop :=
+  forall (X X' : cpoType) (R : Rel X X'), TR X X' R PBot PBot.
 End axiom.
 
 Record TRaccFO (T T' : monadType) := mkTRacc {
   TR :> TRtypeFO T T';
-  axiomAcc :> acceptableTRFO TR
+  axiomAcc :> acceptableTRFO TR;
+  axiomStrict :> strictTRFO TR
 }.
 
 End AcceptableFO.
@@ -35,6 +40,7 @@ Notation TRtypeFO := AcceptableFO.TRtypeFO.
 Notation TRaccTypeFO := AcceptableFO.TRaccFO.
 Notation TRFO := AcceptableFO.TR.
 Notation AccFO :=  AcceptableFO.axiomAcc.
+Notation StrFO := AcceptableFO.axiomStrict.
 
 Section Purity.
 Variables A B : cpoType.
@@ -47,16 +53,27 @@ End Purity.
 Section RepresentationTheorems.
 Variables A B : cpoType.
 
-Lemma lem_pure (g : A =-> B) : isPure (fun T => (@tval T _) << g).
+Lemma lem_pure (g : A =-> B _BOT) :
+  isPure (fun T => mu1 (@tval T _) << g).
 Proof.
 rewrite /isPure.
-move => T T' TR a a' Heq.
-rewrite /IdR in Heq.
-apply: AccFO; rewrite /IdR.
-by apply: (fcont_eq_compat (Oeq_refl _)).
+move => T T' TR a a' Heq /=.
+elim: (axiom_liftCpo_dec (g a)) => [H | [b H]].
+- have H' : g a' =-= PBot by rewrite -Heq.
+  have Hmu : (mu1 (tval T B)) (g a) =-= PBot
+    by rewrite H mu1axiom1.
+  have Hmu' : (mu1 (tval T' B)) (g a') =-= PBot
+    by rewrite H' mu1axiom1.
+  apply: (axiom_Rel_compat (Oeq_sym Hmu) (Oeq_sym Hmu')).
+  by apply: StrFO.
+- have H' : g a' =-= Val b by rewrite -Heq.
+  have Hmu : (mu1 (tval T B)) (g a) =-= tval _ _ b
+    by rewrite H mu1axiom2.
+  have Hmu' : (mu1 (tval T' B)) (g a') =-= tval _ _ b
+    by rewrite H' mu1axiom2.
+  apply: (axiom_Rel_compat (Oeq_sym Hmu) (Oeq_sym Hmu')).
+  by apply: AccFO.
 Qed.
-
-Require Import PredomLiftClassical.
 
 Section TopTopMonadicRelation.
 Variable T : monadType.
@@ -75,10 +92,14 @@ Definition RelTopTop (X X' : cpoType) (R : Rel X X')
 
 Definition TRacc1 : TRaccTypeFO T Lift.
 exists RelTopTop.
-rewrite /RelTopTop /RelTop /=.
-move => X X' R /=.
-move => x x' Hxx' h h' H.
-by rewrite Monad.taxiom0 kleisliVal; auto.
+- rewrite /RelTopTop /RelTop /=.
+  move => X X' R /=.
+  move => x x' Hxx' h h' H.
+  by rewrite Monad.taxiom0 kleisliVal; auto.
+- rewrite /RelTopTop /RelTop /=.
+  rewrite /AcceptableFO.strictTRFO.
+  move => X X' R h h' H.
+  by rewrite kleisli_bot taxiom3 mu1axiom1.
 Defined.
 End TopTopMonadicRelation.
 

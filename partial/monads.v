@@ -123,7 +123,29 @@ Proof.
 by [].
 Qed.
 
-Lemma bindCont_simpl R X Y t f h : @tbind (Cont R) X Y t f h =-= t (Fcont_app f h).
+Lemma bindCont_simpl R X Y t f h :
+  @tbind (Cont R) X Y t f h =-= t (Fcont_app f h).
 Proof.
-rewrite /=. apply: (fcont_eq_compat (Oeq_refl _)). by apply: fcont_eq_intro => x.
+rewrite /=.
+apply: (fcont_eq_compat (Oeq_refl _)).
+by apply: fcont_eq_intro => x.
 Qed.
+
+Definition Lift : monadType.
+exists (fun X => liftCppoType X)
+       (fun X => @eta X)
+       (fun X Y => exp_fun (uncurry (@KLEISLI X Y) << SWAP)).
+- rewrite /Monad.axiom0 /= => X Y f x.
+  by rewrite kleisliVal.
+- rewrite /Monad.axiom1 /= => X t.
+  by rewrite kleisli_unit.
+- rewrite /Monad.axiom2 /= => X Y Z t f g.
+  split.
+  + apply: kleisli_leq => y Hy /=.
+    elim: (kleisliValVal Hy) => x [Ex Ey].
+    exists x. by rewrite Ey kleisliVal.
+  + apply: DLless_cond => z Hz.
+    elim: (kleisliValVal Hz) => /= x [Ht H].
+    by rewrite Ht !kleisliVal /=.
+- move => X Y f /=. by rewrite kleisli_bot.
+Defined.

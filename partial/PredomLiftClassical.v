@@ -79,7 +79,7 @@ Definition chainF (s : A _BOT) : natO -> B
          | Val d => f d
        end.
 
-Definition chainF_mono s : monotonic (chainF s).
+Lemma chainF_mono s : monotonic (chainF s).
 move => n m H.
 rewrite /chainF.
 case E : (pred_nth s n) => [sn | d].

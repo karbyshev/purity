@@ -1,9 +1,10 @@
-Require Import ssreflect ssrfun ssrbool eqtype ssrnat seq.
+Require Import ssreflect ssrfun ssrbool eqtype ssrnat seq choice fintype.
 Require Import FunctionalExtensionality.
 Set Automatic Coercions Import.
 Require Import relations.
 Require Import Relations.
 Require Import streams.
+Require Import Program.Equality.
 Require Import Utf8.
 
 Set Implicit Arguments.
@@ -11,33 +12,44 @@ Unset Strict Implicit.
 Unset Printing Implicit Defensive.
 
 Section Functional.
-Variables A B C : Type.
+Variable n : nat.
+Variable A : 'I_n -> Type.
+Variable B : 'I_n -> Type.
+Variable C : Type.
 
 Definition FuncType : Type :=
-  forall S, (A -> State S B) -> State S C.
+  forall S, nProd (fun i => A i -> State S (B i)) -> State S C.
 End Functional.
 
 Section Purity.
-Variables A B C : Type.
+Variable n : nat.
+Variable A : 'I_n -> Type.
+Variable B : 'I_n -> Type.
+Variable C : Type.
 
 Definition isPure (F : FuncType A B C) : Prop
   := forall S S' (TRacc : StateTRaccType S S'),
-       ((@IdR A =R=> (StateTR TRacc) _ _ (@IdR B)) =R=>
-          (StateTR TRacc) _ _ (@IdR C)) (F S) (F S').
+       (nProdR (fun i => IdR (X := A i) =R=>
+                  (StateTR TRacc) _ _ (IdR (X := B i))) =R=>
+          (StateTR TRacc) _ _ (IdR (X := C))) (F S) (F S').
 End Purity.
 
 Section Strategy.
+Variable n : nat.
+Variable A : 'I_n -> Type.
+Variable B : 'I_n -> Type.
+Variable C : Type.
 
-Variables A B C : Type.
 Inductive Tree :=
-  Ans : C -> Tree
-| Que : A -> (B -> Tree) -> Tree.
+  | Ans : C -> Tree
+  | Que : forall i, A i -> (B i -> Tree) -> Tree.
 
-Fixpoint tree2funT S (t : Tree) : (A -> State S B) -> State S C :=
+Fixpoint tree2funT S (t : Tree) :=
   match t with
-    | Ans c => fun k => valState c
-    | Que a f =>
-        fun k => bindState (k a) (fun b => tree2funT (f b) k)
+    | Ans c => fun _ => valState c
+    | Que i a f =>
+        fun (k : nProd (fun i => A i -> State S (B i))) =>
+          bindState ((proj i k) a) (fun b => tree2funT S (f b) k)
   end.
 
 Definition tree2fun (t : Tree) : FuncType A B C.
@@ -50,22 +62,26 @@ Proof. by []. Qed.
 Lemma tree2fun_pure (t : Tree) : isPure (@tree2fun t).
 Proof.
 rewrite /isPure.
-elim: t => [| a f Hind].
+elim: t => [| i a f Hind].
 - rewrite /ArrR /=.
   move => c S S' TRacc k k' H /=.
   by apply TRacc.
 - rewrite /ArrR /=. rewrite /ArrR /= in Hind.
   move => S S' TRacc k k' H /=.
-  eapply (proj2 (StateAcc TRacc)); first by eapply H.
+  have Htmp := nProdR_elim H i.
+  eapply (proj2 (StateAcc TRacc)); first by apply Htmp.
   rewrite /ArrR => b b' /=; elim. by apply: Hind.
 Qed.
 
-Lemma tree2fun_Ans_simpl S (k : A -> State S B) d s :
+Lemma tree2fun_Ans_simpl
+        S (k : nProd (fun i => A i -> State S (B i))) d s :
   tree2fun (Ans d) k s = (d, s).
 Proof. by []. Qed.
 
-Lemma tree2fun_Que_simpl S (k : A -> State S B) a f b1 s s1 :
-  k a s = (b1, s1) ->
+Lemma tree2fun_Que_simpl
+        S (k : nProd (fun i => A i -> State S (B i)))
+        i a f b1 s s1 :
+  proj i k a s = (b1, s1) ->
   tree2fun (Que a f) k s = tree2fun (f b1) k s1.
 Proof.
 move => H.
@@ -75,155 +91,8 @@ Qed.
 
 End Strategy.
 
-Implicit Arguments Ans [A B C].
-Implicit Arguments Que [A B C].
-
-Parameters A B C : Type.
-(* We assume that set B is not empty
-   with botB being a destinguished element *)
-Parameter botB : B.
-
-Section TR0.
-Variables S S' : Type.
-Variable Inv : S -> Prop.
-Variable Trans : relation (S * S').
-
-Definition TR0 : StateTRtype S S'
-  := fun X X' (R : Rel X X')
-         (tx : State S X) (tx' : State S' X') =>
-    forall s s',
-      let (x, s1) := tx s in
-      let (x',s1') := tx' s' in
-        (exists u', R x u') /\ (exists u, R u x') /\
-        (Inv s1 ->
-          R x x' /\ Inv s /\ Trans (s,s') (s1,s1')).
-
-Variable reflexiveTrans : reflexive _ Trans.
-Variable transitiveTrans : transitive _ Trans.
-
-Definition TR0acc : StateTRaccType S S'.
-exists TR0.
-split.
-- move => X X' R x x' Hxx'.
-  move => s s'. rewrite /valState /tval /=.
-  by firstorder.
-- move => X X' Y Y' Q R f f' t t' HQ Harr.
-  move => s s'. rewrite /bindState /tbind /=.
-  case E1 : (t s) => [x1 s1].
-  case E1' : (t' s') => [x1' s1'].
-  case E2 : (f x1 s1) => [x2 s2].
-  move E2' : (f' x1' s1') => [x2' s2'].
-  have Htmp := HQ s s'. rewrite E1 E1' in Htmp.
-  case: Htmp => [[u1' H11] [[u1 H12] H13]].
-  split; [| split ].
-  + have Htmp := Harr _ _ H11 s1 s1'. rewrite E2 in Htmp.
-    destruct (f' u1' s1'). by intuition.
-  + have Htmp := Harr _ _ H12 s1 s1'. rewrite E2' in Htmp.
-    destruct (f u1 s1). by intuition.
-  + have H : Inv s2 -> Inv s1.
-      have Htmp := Harr _ _ H11 s1 s1'. rewrite E2 in Htmp.
-      destruct (f' u1' s1'). by intuition.
-    move => Hinv.
-    have HQ1 : Q x1 x1' by intuition.
-    have Htmp := Harr _ _ HQ1 s1 s1'. rewrite E2 E2' in Htmp.
-    by firstorder.
-Defined.
-End TR0.
-
-(* Now, we prove that snapback is not pure *)
-
-Record TestMini : Type
-  := mkTestMini { calmini : bool }.
-
-Definition initTestMini : TestMini := {| calmini := false |}.
-
-Definition kTestMini : A -> State TestMini B := 
-  fun _ _ => (botB, {| calmini := true |}).
-
-Theorem snapback_is_not_pure
-  (F : FuncType A B C) (Hpure : isPure F) S k s :
-  let (c1',s1') := F TestMini kTestMini initTestMini in 
-  let (c1, s1) := F S k s in
-    s1'.(calmini) = false -> c1 = c1' /\ s = s1.
-Proof.
-pose Inv : TestMini -> Prop := fun s => s.(calmini) = false.
-pose Tran : relation (TestMini * S)
-  := fun (p1 p2 : TestMini * S) =>
-       let (_,s1') := p1 in
-       let (_,s2') := p2 in
-         s1' = s2'.
-have HreflTran : reflexive _ Tran
-  by rewrite /Tran; move => [_ s0].
-have HtransTran : transitive _ Tran
-  by rewrite /Tran; move => [_ s1] [_ s2] [_ s3]; congruence.
-pose TR := @TR0acc _ _ Inv Tran HreflTran HtransTran.
-have Harr := Hpure _ _ TR.
-have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTestMini k.
-  move => a a'; elim => {a'}.
-  rewrite /TR /= /TR0 /= /IdR.
-  move => s0' s0.
-  elim E : (k a s0) => [c s1].
-  by intuition; eauto.
-have H := Harr _ _ Hargs initTestMini s => {Harr}.
-case E1' : (F TestMini kTestMini initTestMini) => [c' s1'].
-case E1 : (F S k s) => [c s1].
-rewrite E1 E1' in H.
-elim: H => [_ [_ H]].
-rewrite /= /Inv /IdR in H.
-by intuition.
-Qed.
-
-(* The example of a more general acceptable monadic relation *)
-Section TRinv.
-Variables S S' : Type.
-Variable BigInv : S -> Prop.
-Variable SmallInv : S -> Prop.
-Variable Trans : relation (S * S').
-
-Definition TRinv : StateTRtype S S'
-  := fun X X' (R : Rel X X')
-         (tx : State S X) (tx' : State S' X') =>
-    forall s s',
-      let (x, s1) := tx s in
-      let (x',s1') := tx' s' in
-        (exists u', R x u') /\ (exists u, R u x') /\
-        (BigInv s -> BigInv s1) /\
-        (BigInv s -> SmallInv s1 ->
-          R x x' /\ Trans (s,s') (s1,s1') /\ SmallInv s).
-
-Variable reflexiveTrans : reflexive _ Trans.
-Variable transitiveTrans : transitive _ Trans.
-
-Definition TRinvacc : StateTRaccType S S'.
-exists TRinv.
-split.
-- move => X X' R x x' Hxx'.
-  move => s s'. rewrite /valState /tval /=.
-  by firstorder.
-- move => X X' Y Y' Q R f f' t t' HQ Harr.
-  move => s s'. rewrite /bindState /tbind /=.
-  case E1 : (t s) => [x1 s1].
-  case E1' : (t' s') => [x1' s1'].
-  case E2 : (f x1 s1) => [x2 s2].
-  move E2' : (f' x1' s1') => [x2' s2'].
-  have Htmp := HQ s s'. rewrite E1 E1' in Htmp.
-  case: Htmp => [[u1' H11] [[u1 H12] H13]].
-  split; [| split; [| split ]].
-  + have Htmp := Harr _ _ H11 s1 s1'. rewrite E2 in Htmp.
-    destruct (f' u1' s1'). by intuition.
-  + have Htmp := Harr _ _ H12 s1 s1'. rewrite E2' in Htmp.
-    destruct (f u1 s1). by intuition.
-  + have H := Harr _ _ H11 s1 s1'. rewrite E2 in H.
-    destruct (f' u1' s1'). by intuition.
-  + have H : BigInv s -> SmallInv s2 -> SmallInv s1.
-      have Htmp := Harr _ _ H11 s1 s1'. rewrite E2 in Htmp.
-      destruct (f' u1' s1'). by intuition.
-    move => Hbig Hsmall2.
-    have HQ1 : Q x1 x1' by intuition.
-    have Htmp := Harr _ _ HQ1 s1 s1'. rewrite E2 E2' in Htmp.
-    by firstorder.
-Defined.
-End TRinv.
+Implicit Arguments Ans [n A B C].
+Implicit Arguments Que [n A B C].
 
 (* Another simple example *)
 Section TRtrans.
@@ -233,9 +102,9 @@ Variable Trans' : relation S'.
 
 Definition TRtrans : StateTRtype S S' :=
   fun X X' (R : Rel X X') (tx : State S X) (tx' : State S' X') => 
-    forall s s',
-      let (x, s1) := tx s in 
-      let (x',s1'):= tx' s' in 
+    forall s s' x x' s1 s1',
+      tx s = (x, s1) ->
+      tx' s' = (x',s1') ->
         (exists u', R x u') /\ (exists u, R u x') /\
         (Trans s s1) /\ (Trans' s' s1').
 
@@ -248,56 +117,104 @@ Definition TRtransacc : StateTRaccType S S'.
 exists TRtrans.
 split.
 - move => X X' R x x' Hxx'.
-  move => s s'. rewrite /valState /tval /=.
+  move => s s' x1 x1' s1 s1'.
+  rewrite /valState /tval /=.
+  case => ? ?; case => ? ?; subst.
   by firstorder.
 - move => X X' Y Y' Q R f f' t t' HQ Harr.
-  move => s s'. rewrite /bindState /tbind /=.
+  move => s s' x2 x2' s2 s2'. rewrite /bindState /tbind /=.
   case E1 : (t s) => [x1 s1].
   case E1' : (t' s') => [x1' s1'].
-  case E2 : (f x1 s1) => [x2 s2].
-  move E2' : (f' x1' s1') => [x2' s2'].
-  have Htmp := HQ s s'. rewrite E1 E1' in Htmp.
+  move => E2 E2'.
+  have Htmp := HQ s s' _ _ _ _ E1 E1'.
   case: Htmp => [[u1' H11] [[u1 H12] [H13 H14]]].
   split; [| split; [| split]].
-  + have Htmp := Harr _ _ H11 s1 s1'. rewrite E2 in Htmp.
-    destruct (f' u1' s1'). by intuition.
-  + have Htmp := Harr _ _ H12 s1 s1'. rewrite E2' in Htmp.
-    destruct (f u1 s1). by intuition.
-  + have H := Harr _ _ H11 s1 s1'. rewrite E2 in H.
+  + have Htmp := Harr _ _ H11 s1 s1'.
+    rewrite E2 in Htmp.
     destruct (f' u1' s1').
-    by apply: (transitiveTrans H13); intuition.
-  + have H := Harr _ _ H12 s1 s1'. rewrite E2' in H.
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
+    by intuition.
+  + have Htmp := Harr _ _ H12 s1 s1'. rewrite E2' in Htmp.
     destruct (f u1 s1).
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
+    by intuition.
+  + have Htmp := Harr _ _ H11 s1 s1'. rewrite E2 in Htmp.
+    destruct (f' u1' s1').
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
+    by apply: (transitiveTrans H13); intuition.
+  + have Htmp := Harr _ _ H12 s1 s1'. rewrite E2' in Htmp.
+    destruct (f u1 s1).
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
     by apply: (transitiveTrans' H14); intuition.
 Defined.
 End TRtrans.
 
-Record TestSet := mkTest
-  { arg : option A;
-    que : seq A;
-    ans : seq B }.
 
-Definition initTest (bs : seq B) : TestSet :=
+Variable n : nat.
+Variable A : 'I_n -> Type.
+Variable B : 'I_n -> Type.
+Variable C : Type.
+
+(* We assume that sets B_i are not empty
+   with destinguished elements botB_i *)
+Parameter botB : forall i, B i.
+
+Record TestSet := mkTest
+  { arg : option (nSum A);
+    que : seq (nSum A);
+    ans : seq (nSum B) }.
+
+Definition initTest (bs : seq (nSum B)) : TestSet :=
   {| arg := None;
      que := [::];
      ans := bs |}.
 
-Definition kTest : A -> State TestSet B := 
-  fun a s =>
-    match s.(arg) with
-      | Some _ => (botB, s)
-      | None =>
-          match s.(ans) with
-            | [::] =>
-                (botB, {| arg := Some a;
-                          que := s.(que);
-                          ans := [::] |})
-            | b :: bs =>
-                (b, {| arg := s.(arg);
-                       que := s.(que) ++ [::a];
-                       ans := bs |})
-          end
-    end.
+(* TODO: prove decidability of ordinals *)
+Lemma ord_is_decidable n (i j : 'I_n) :
+  {i = j} + {i <> j}.
+Proof. admit. Qed.
+
+Definition pick_b i j (b : B j) : B i.
+elim: (ord_is_decidable i j) => [e | ne].
+by subst.
+by refine (botB i).
+Defined.
+
+Lemma pick_b_eq i (b : B i) : pick_b i b = b.
+Proof.
+rewrite /pick_b.
+case: (ord_is_decidable i i) => //=.
+move => H.
+by dependent destruction H.
+Qed.
+
+Lemma pick_b_neq i j (H : i <> j) (b : B j) : pick_b i b = botB i.
+Proof.
+rewrite /pick_b.
+by case: (ord_is_decidable i j) => //=.
+Qed.
+
+Definition kTest : nProd (fun i => A i -> State TestSet (B i)) :=
+  tuple (
+      fun i =>
+        fun a s =>
+          match s.(arg) with
+            | Some _ => (botB i, s)
+            | None =>
+                match s.(ans) with
+                  | [::] =>
+                      (botB i, {| arg := Some (inj a);
+                                  que := s.(que);
+                                  ans := [::] |})
+                  | b :: bs =>
+                      let j := projT1 b in
+                      let bj := projT2 b in
+                      let b' := pick_b i bj in 
+                        (b', {| arg := s.(arg);
+                                    que := s.(que) ++ [:: inj a];
+                                    ans := bs |})
+                end
+      end).
 
 Lemma tree2fun_kTest_cal (t : Tree A B C) s s1 r x :
   (r,s1) = tree2fun t kTest s ->
@@ -305,14 +222,16 @@ Lemma tree2fun_kTest_cal (t : Tree A B C) s s1 r x :
   s1 = s.
 Proof.
 move: s s1 r x.
-elim: t => [c | a f IH].
+elim: t => [c | i a f IH].
 - rewrite /= /valState /tval /=.
   by move => s s1 r x [_ ?]; subst.
 - rewrite /= /bindState /tbind /=.
   move => s s2 r x.
-  elim E: (kTest a s) => [b s1].
+  elim E: (proj i kTest a s) => [b s1].
   move => H Harg.
-  rewrite /kTest Harg in E. case: E => _ ?; subst s1.
+  rewrite /kTest /= Harg in E.
+  case: E => _ ?; subst s1.
+  rewrite Harg in H.
   by apply: IH; eauto.
 Qed.
 
@@ -335,31 +254,34 @@ pose R : relation TestSet
          l ++ s1.(que) = s1'.(que).
 pose TR := TRparamAcc R.
 have Harr := Hpure _ _ TR.
-have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTest kTest.
-  move => x x'; elim => {x'}.
+have Hargs : nProdR (fun i => @IdR _ =R=> StateTR TR (@IdR _)) kTest kTest.
+  move => i x x'; elim => {x'}.
   rewrite /TR /= /TRparam /=.
   move => ts ts' H /=.
-  case E : (kTest x ts) => [x1 ts1].
-  case E' : (kTest x ts') => [x1' ts1'].
+  case E : (proj i kTest x ts) => [x1 ts1].
+  case E' : (proj i kTest x ts') => [x1' ts1'].
   move: H => [Harg [Hans Hque]].
   rewrite /IdR /R /=.
-  rewrite /kTest in E.
-  rewrite /kTest in E'.
+  rewrite /kTest /= in E.
+  rewrite /kTest /= in E'.
   rewrite -Harg -Hans -Hque in E'.
   move: E E'; case Earg: (arg ts) => [a |].
-  + by case => ? ?; subst x1 ts1;
+  + rewrite /=.
+    case => ? ?; subst x1 ts1;
     case => ? ?; subst x1' ts1'.
-  + case: (ans ts) => [| b bs].
-    * by case => ? ?; subst x1 ts1;
+    by rewrite /= -Harg Earg /= -Harg Earg.
+  + case Eans: (ans ts) => [| b bs].
+    * case => ? ?; subst x1 ts1;
       case => ? ?; subst x1' ts1'.
-    * case => ? ?; subst x1 ts1.
+      by rewrite /= -Harg Earg /= -Hans Eans /=.
+    * case => ? ?; subst x1 ts1;
       case => ? ?; subst x1' ts1'.
-      by rewrite /= catA.
+      rewrite /= -Harg Earg /= -Hans Eans /=.
+      by rewrite catA -Hque.
 have Htmp := Harr _ _ Hargs s s' => {Harr Hargs}.
 move => H H'. rewrite -H -H' in Htmp => {H H'}.
 now firstorder.
 Qed.
-
 
 Section TR1gen.
 
@@ -368,14 +290,23 @@ Variable Trans : relation S.
 Variable Trans' : relation S'.
 Variable StateInv : S -> S' -> Prop.
 
-Definition TR1gen : StateTRtype S S' :=
+(*Definition TR1gen : StateTRtype S S' :=
   fun X X' (R : Rel X X') (tx : State S X) (tx' : State S' X') => 
     forall s s',
       let (x, s1) := tx s in
       let (x',s1'):= tx' s' in
         (exists u', R x u') /\ (exists u, R u x') /\
         (Trans s s1) /\ (Trans' s' s1') /\
-        (StateInv s s' -> StateInv s1 s1' /\ R x x').
+        (StateInv s s' -> StateInv s1 s1' /\ R x x').*)
+
+Definition TR1gen : StateTRtype S S' :=
+  fun X X' (R : Rel X X') (tx : State S X) (tx' : State S' X') => 
+    forall s s' x x' s1 s1',
+      tx s = (x, s1) ->
+      tx' s' = (x',s1') ->
+      (exists u', R x u') /\ (exists u, R u x') /\
+      (Trans s s1) /\ (Trans' s' s1') /\
+      (StateInv s s' -> StateInv s1 s1' /\ R x x').
 
 Variable reflexiveTrans : reflexive _ Trans.
 Variable transitiveTrans : transitive _ Trans.
@@ -386,30 +317,41 @@ Definition TR1genacc : StateTRaccType S S'.
 exists TR1gen.
 split.
 - move => X X' R x x' Hxx'.
-  move => s s'. rewrite /valState /tval /=.
+  move => s s' x1 x1' s1 s1'.
+  rewrite /valState /tval /=.
+  case => ? ?; subst.
+  case => ? ?; subst.
   by firstorder.
 - move => X X' Y Y' Q R f f' t t' HQ Harr.
-  move => s s'. rewrite /bindState /tbind /=.
+  move => s s' y1 y1' r1 r1'. rewrite /bindState /tbind /=.
   case E1 : (t s) => [x1 s1].
   case E1' : (t' s') => [x1' s1'].
-  case E2 : (f x1 s1) => [x2 s2].
-  move E2' : (f' x1' s1') => [x2' s2'].
+  move => E2 E2'.
   have Htmp := HQ s s'. rewrite E1 E1' in Htmp.
-  case: Htmp => [[u1' H11] [[u1 H12] [H13 [H14 H15]]]].
+  case: (Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl)
+    => [[u1' H11] [[u1 H12] [H13 [H14 H15]]]] {Htmp}.
   split; [| split; [| split; [| split ]]].
-  + have Htmp := Harr _ _ H11 s1 s1'. rewrite E2 in Htmp.
-    destruct (f' u1' s1'). by intuition.
-  + have Htmp := Harr _ _ H12 s1 s1'. rewrite E2' in Htmp.
-    destruct (f u1 s1). by intuition.
-  + have H := Harr _ _ H11 s1 s1'. rewrite E2 in H.
-    destruct (f' u1' s1').
+  + have Htmp := Harr _ _ H11 s1 s1'.
+    rewrite E2 in Htmp. destruct (f' u1' s1').
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
+    by intuition.
+  + have Htmp := Harr _ _ H12 s1 s1'.
+    rewrite E2' in Htmp. destruct (f u1 s1).
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
+    by intuition.
+  + have Htmp := Harr _ _ H11 s1 s1'.
+    rewrite E2 in Htmp. destruct (f' u1' s1').
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
     by apply: (transitiveTrans H13); intuition.
-  + have H := Harr _ _ H12 s1 s1'. rewrite E2' in H.
-    destruct (f u1 s1).
+  + have Htmp := Harr _ _ H12 s1 s1'.
+    rewrite E2' in Htmp. destruct (f u1 s1).
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
     by apply: (transitiveTrans' H14); intuition.
   + move => Hstate0.
     elim: (H15 Hstate0) => [Hstate1 Q1].
-    have Htmp := Harr _ _ Q1 s1 s1'. rewrite E2 E2' in Htmp.
+    have Htmp := Harr _ _ Q1 s1 s1'.
+    rewrite E2 E2' in Htmp.
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
     by intuition.
 Defined.
 End TR1gen.
@@ -440,30 +382,31 @@ pose Inv : relation TestSet := fun s s' => s = s'.
 pose TR := @TR1genacc _ _ Trans Trans' Inv
             HreflTrans HtransTrans HreflTrans' HtransTrans'.
 have Harr := Hpure _ _ TR.
-have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTest kTest.
-  move => x x'. elim => {x'}.
+have Hargs : nProdR (fun i => @IdR _ =R=> StateTR TR (@IdR _)) kTest kTest.
+  move => i x x'. elim => {x'}.
   rewrite /TR /= /TR1gen.
   move => s s'.
-  case E1 : (kTest x s) => [x1 s1].
-  case E1' : (kTest x s') => [x1' s1'].
+  move => x1 x1' s0 s0' H H'.
   split; [| split; [| split; [| split ]]] => //.
   - by exists x1.
   - by exists x1'.
   - rewrite /Trans.
-    rewrite /kTest in E1.
     split.
-    + move => Harg; rewrite Harg in E1.
-      move: E1; case: (ans s) => [| b bs] /=;
-        by case => _ ?; subst s1; firstorder.
-    + move => Hans.
-      move: E1; case: (arg s) => [a |].
-      * by case => _ ?; subst s1.
-      * rewrite Hans. by case => _ ?; subst s1.
+    + move => Harg; rewrite Harg in H.
+      move: H; case: (ans s) => [| b bs] /=.
+      * case => _ ?; by subst s0.
+      * case => _ ?; subst s0.
+        by rewrite /=; clear - bs; firstorder.
+    + move => Hans. rewrite Hans /= in H.
+      move: H; case: (arg s) => [a |].
+      * by case => _ ?; subst s0.
+      * by case => _ ?; subst s0.
   - rewrite /Inv /IdR. move => ?; subst s'.
-    by rewrite E1 in E1'; case: E1'.
+    by rewrite H in H'; case: H'.
 move => bs c s Hf.
 have Htmp := Harr _ _ Hargs (initTest bs) (initTest bs).
 rewrite Hf in Htmp.
+have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
 by firstorder.
 Qed.
 
@@ -495,12 +438,11 @@ pose Inv : relation TestSet := fun s s' => s = s'.
 pose TR := @TR1genacc _ _ Trans Trans' Inv
             HreflTrans HtransTrans HreflTrans' HtransTrans'.
 have Harr := Hpure _ _ TR.
-have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTest kTest.
-  move => x x'. elim => {x'}.
+have Hargs : nProdR (fun i => @IdR _ =R=> StateTR TR (@IdR _)) kTest kTest.
+  move => i x x'. elim => {x'}.
   rewrite /TR /= /TR1gen.
   move => s s'.
-  case E1 : (kTest x s) => [x1 s1].
-  case E1' : (kTest x s') => [x1' s1'].
+  move => x1 x1' s1 s1' E1 E1'.
   split; [| split; [| split; [| split ]]] => //.
   - by exists x1.
   - by exists x1'.
@@ -513,13 +455,13 @@ have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTest kTest.
       * case => _ ?; subst s1 => /=.
         by exists [::], [::]; rewrite !cats0.
       * case => _ ?; subst s1 => /=.
-        by exists [::b], [::x].
+        by exists [::b], [:: inj x].
   - rewrite /Inv /IdR. move => ?; subst s'.
     by rewrite E1 in E1'; case: E1'.
 move => bs c r Hf.
 have Htmp := Harr _ _ Hargs (initTest bs) (initTest bs).
-rewrite Hf in Htmp.
-elim: Htmp => [_ [_ [H _]]].
+have H := Htmp _ _ _ _ Hf Hf => {Htmp}.
+elim: H => [_ [_ [H _]]].
 clear - H.
 rewrite /Trans /= in H.
 case: H => [bb [aa H]].
@@ -528,7 +470,7 @@ by firstorder; congruence.
 Qed.
 
 Inductive Fun2Tree (F : FuncType A B C)
-  : seq B -> Tree A B C -> Prop :=
+  : seq (nSum B) -> Tree A B C -> Prop :=
   | BaseCase :
       forall c l s0 s1, 
         s0 = initTest l /\
@@ -536,12 +478,12 @@ Inductive Fun2Tree (F : FuncType A B C)
         s1.(arg) = None ->
         Fun2Tree F l (Ans c)
   | InductiveCase :
-      forall a (cont : B -> Tree A B C) l s0 s1 v,
+      forall i a (cont : B i -> Tree A B C) l s0 s1 v,
         s0 = initTest l /\
         (v, s1) = F _ kTest s0 /\
-        s1.(arg) = Some a /\
-        (forall b, Fun2Tree F (l ++ [::b]) (cont b)) ->
-        Fun2Tree F l (Que a cont).
+        s1.(arg) = Some (inj a) /\
+        (forall b, Fun2Tree F (l ++ [:: inj b]) (cont b)) ->
+        Fun2Tree F l (Que i a cont).
 
 Lemma Fun2Tree_Ans_elim F l c :
   Fun2Tree F l (Ans c) ->
@@ -554,17 +496,19 @@ rewrite H0 in H1.
 by exists s1.
 Qed.
 
-Lemma Fun2Tree_Que_elim F l a cont :
-  Fun2Tree F l (Que a cont) ->
+Lemma Fun2Tree_Que_elim i F l a cont :
+  Fun2Tree F l (Que i a cont) ->
   exists s1, exists c,
     (c, s1) = F _ kTest (initTest l) /\
-    s1.(arg) = Some a /\
-    (forall b, Fun2Tree F (l ++ [:: b]) (cont b)).
+    s1.(arg) = Some (inj a) /\
+    (forall b, Fun2Tree F (l ++ [:: inj b]) (cont b)).
 Proof.
 move => H.
-inversion H as [| a0 cont0 l0 s0 s1 v [H1 [H2 H3]] e1 e2].
-subst cont0 a0 l0.
-rewrite H1 in H2 => {H1}.
+inversion H as [| j a0 cont0 l0 s0 s1 v [H0 [H1 [H2 H3]]] e1 e2].
+subst j l0 s0.
+dependent destruction H0.
+dependent destruction H1.
+rewrite -H3 => {H3}.
 by exists s1; exists v.
 Qed.
 
@@ -573,20 +517,20 @@ Lemma Fun2Tree_functional (F : FuncType A B C) l t1 t2 :
   Fun2Tree F l t1 -> Fun2Tree F l t2 -> t1 = t2.
 Proof.
 move: l t2.
-elim: t1 => [c1 | a1 k1 IH].
+elim: t1 => [c1 | i a1 k1 IH].
 - move => l t2 H1.
   elim: (Fun2Tree_Ans_elim H1) => [r1 [H11 H12]] {H1}.
-  case: t2 => [c2 | a2 k2] H2.
+  case: t2 => [c2 | j a2 k2] H2.
   + elim: (Fun2Tree_Ans_elim H2) => [r2 [H21 H22]] {H2}.
     rewrite -H11 in H21.
-    by inversion_clear H21.
+    by inversion H21; subst.
   + elim: (Fun2Tree_Que_elim H2) => r2 [c2 [H21 [H22 H23]]] {H2}.
     rewrite -H11 in H21.
     inversion H21; subst.
     by rewrite H12 in H22.
 - move => l t2 H1.
   elim: (Fun2Tree_Que_elim H1) => r1 [c1 [H11 [H12 H13]]] {H1}.
-  case: t2 => [c2 | a2 k2] H2.
+  case: t2 => [c2 | j a2 k2] H2.
   + elim: (Fun2Tree_Ans_elim H2) => [r2 [H21 H22]] {H2}.
     rewrite -H11 in H21.
     inversion H21; subst.
@@ -596,32 +540,33 @@ elim: t1 => [c1 | a1 k1 IH].
     inversion H21; subst; clear H21.
     rewrite H12 in H22.
     inversion H22; subst; clear H22.
-    have Hk : k1 = k2 by extensionality b; firstorder.
+    dependent destruction H1.
+    have Hk : k1 = k2 by extensionality b; apply: IH.
     by subst.
 Qed.
 
-Lemma TreeFunTree_Que a f b l t :
+Lemma TreeFunTree_Que i a f b l t :
   Fun2Tree (tree2fun (f b)) l t ->
-  Fun2Tree (tree2fun (Que a f)) (b :: l) t.
+  Fun2Tree (tree2fun (Que i a f)) (inj b :: l) t.
 Proof.
-move: a f b l.
-elim: t => [c | a f IH].
-- move => a f b l H.
+move: i a f b l.
+elim: t => [c | j a f IH].
+- move => i a f b l H.
   elim: (Fun2Tree_Ans_elim H) => s {H} [H H0].
   pose s1 := {| arg := s.(arg);
-                que := a :: s.(que);
+                que := inj a :: s.(que);
                 ans := s.(ans) |}.
-  apply: (@BaseCase _ _ _ (initTest (b :: l)) s1).
+  apply: (@BaseCase _ _ _ (initTest (inj b :: l)) s1).
   split; [| split] => //.
-  rewrite /= /bindState /tbind /=.
+  rewrite /= /bindState /tbind /= pick_b_eq.
   elim H': (tree2fun (f b) kTest
-             {| arg:=None; que:=[:: a]; ans:=l |}) => [c' s1'].
+             {| arg:=None; que:=[:: inj a]; ans:=l |}) => [c' s1'].
   symmetry in H'.
   have Htmp := lem_que_app_sim (tree2fun_pure _) H H'.
   have H1 : c = c' /\
             arg s = arg s1' /\
             ans s = ans s1' /\
-            [::a] ++ que s = que s1'
+            [:: inj a] ++ que s = que s1'
     by apply: Htmp.
   move => {Htmp}.
   move: H1 => [? [Earg [Eans Eque]]]; subst c'.
@@ -630,25 +575,25 @@ elim: t => [c | a f IH].
   rewrite /= in Eque.
   rewrite Earg Eans Eque. by destruct s1'.
 - idtac.
-  move => a1 f1 b l H.
+  move => i a1 f1 b l H.
   elim: (Fun2Tree_Que_elim H) => s {H} [c H].
   pose s1 := {| arg := s.(arg);
-                que := a1 :: s.(que);
+                que := inj a1 :: s.(que);
                 ans := s.(ans) |}.
-  apply: (@InductiveCase _ _ _ _ (initTest (b :: l)) s1 c).
+  apply: (@InductiveCase _ _ _ _ _ (initTest (inj b :: l)) s1 c).
   split => //.
-  rewrite /= /bindState /tbind /=.
+  rewrite /= /bindState /tbind /= pick_b_eq.
   split; [| split]; try easy; last first.
   + move => b1. by apply: IH; intuition.
   + case: H => [H _].
     elim H': (tree2fun (f1 b) kTest
-               {| arg := None; que := [:: a1]; ans := l |}) => [c' s1'].
+               {| arg := None; que := [:: inj a1]; ans := l |}) => [c' s1'].
     symmetry in H'.
     have Htmp := lem_que_app_sim (tree2fun_pure _) H H'.
     have H1 : c = c' /\
             arg s = arg s1' /\
             ans s = ans s1' /\
-            [::a1] ++ que s = que s1'
+            [:: inj a1] ++ que s = que s1'
       by apply: Htmp.
     move => {Htmp}.
     move: H1 => [? [Earg [Eans Eque]]]; subst c'.
@@ -662,34 +607,33 @@ Qed.
 Lemma TreeFunTree (t : Tree A B C) :
   Fun2Tree (tree2fun t) [::] t.
 Proof.
-elim: t => [c | a f H].
+elim: t => [c | i a f H].
 - now apply: BaseCase.
-- elim E : (tree2fun (f botB) kTest
-              {| arg := Some a; que := [::]; ans := [::] |})
+- elim E : (tree2fun (f (botB i)) kTest
+              {| arg := Some (inj a); que := [::]; ans := [::] |})
            => [r s].
   symmetry in E.
-  apply: (@InductiveCase _ _ _ _ (initTest [::]) s r).
+  apply: (@InductiveCase _ _ _ _ _ (initTest [::]) s r).
   split => //.
   rewrite /= /bindState /tbind /=.
   split; [| split] => //.
-  + have e : s = {| arg := Some a; que := [::]; ans := [::] |}
+  + have e :
+      s = {| arg := Some (inj a); que := [::]; ans := [::] |}
       by apply: (tree2fun_kTest_cal E).
     now rewrite e.
   + move => b. now apply: TreeFunTree_Que.
 Qed.
 
-
 Section Matches.
 Variable S : Type.
 
-Inductive Matches (k : A -> State S B) :
-  seq A -> seq B -> relation S :=
+Inductive Matches (k : nProd (fun i => A i -> State S (B i))) :
+  seq (nSum A) -> seq (nSum B) -> relation S :=
   | MatchesN : forall s, Matches k nil nil s s 
-  | MatchesC : forall q v s qs vs s1 s2, 
-      k q s1 = (v, s2) ->
+  | MatchesC : forall i q v s qs vs s1 s2, 
+      proj i k q s1 = (v, s2) ->
       Matches k qs vs s s1 ->
-      Matches k (qs ++ [::q]) (vs ++ [::v]) s s2.
-
+      Matches k (qs ++ [:: inj q]) (vs ++ [:: inj v]) s s2.
 Hint Constructors Matches.
 
 Lemma MatN_elim k s s1 :
@@ -711,23 +655,51 @@ induction l1 as [| a1 l1 IHl1].
   + case; elim => H. split; try f_equal; by firstorder.
 Qed.
 
-Lemma MatC_elim k qs q vs v s s2 :
-  Matches k (qs ++ [::q]) (vs ++ [::v]) s s2 ->
+(* TODO move it to relations.v *)
+Lemma inj_is_injective (X : 'I_n -> Type) i (a b : X i) :
+  inj a = inj b -> a = b.
+Proof.
+rewrite /inj => H.
+by dependent destruction H.
+Qed.
+
+Lemma MatC_elim i k qs q vs v s s2 :
+  Matches k (qs ++ [:: inj q]) (vs ++ [:: inj v]) s s2 ->
   exists s1,
-    (k q s1 = (v, s2) /\ Matches k qs vs s s1).
+    (proj i k q s1 = (v, s2) /\ Matches k qs vs s s1).
 Proof.
 move => H. inversion H.
 - by destruct qs.
 - subst s0 s3.
-  elim (app_inj_tail H0) => e1 e2 {H0}. subst.
-  elim (app_inj_tail H1) => e1 e2 {H1}. subst.
+  elim: (app_inj_tail H0) => e1 e2 {H0}.
+  dependent destruction e2; subst.
+  elim: (app_inj_tail H1) => e1 e2 {H1}.
+  dependent destruction e2; subst.
+  rewrite /= in H2.
   by eauto.
+Qed.
+
+Lemma MatC_elim_bis k qs q vs v s s2 :
+  Matches k (qs ++ [:: q]) (vs ++ [:: v]) s s2 ->
+  exists i qx vx s1,
+    q = inj (i:=i) qx /\
+    v = inj (i:=i) vx /\
+    (proj i k qx s1 = (vx, s2) /\ Matches k qs vs s s1).
+Proof.
+move => H. inversion H.
+- by destruct qs.
+- subst s0 s3.
+  elim: (app_inj_tail H0) => e1 e2 {H0}.
+  dependent destruction e2; subst.
+  elim: (app_inj_tail H1) => e1 e2 {H1}.
+  dependent destruction e2; subst.
+  by exists i, q0, v0, s1.
 Qed.
 
 Lemma Mat_size k qs vs s s1 :
   Matches k qs vs s s1 -> size qs = size vs.
 Proof.
-elim => [// | {qs vs s s1} q v _ qs vs _ _ _ _ H].
+elim => [// | i {qs vs s s1} q v _ qs vs _ _ _ _ H].
 by rewrite !size_cat H.
 Qed.
 
@@ -766,14 +738,15 @@ Lemma Mat_inj1 k qs vs s0 s1 s2 :
 Proof.
 move => H. move: s2. elim: H.
 - move => {qs vs s0 s1} s s2. move => H.
-  inversion H as [| ? ? ? qs vs] => //. by destruct qs.
-- move => {qs vs s0 s1} q v s qs vs s1 s2 E H IH.
+  inversion H as [| ? ? ? ? qs vs] => //. by destruct qs.
+- move => i {qs vs s0 s1} q v s qs vs s1 s2 E H IH.
   move => s3 Hcons.  
   inversion Hcons.
   + by destruct qs.
-  + elim (app_inj_tail H0). move => e1 e2. subst qs0 q0.
-    elim (app_inj_tail H1). move => e1 e2. subst vs0 v0.
-    move => {H0 H1}.
+  + elim (app_inj_tail H0) => e1 e2.
+    dependent destruction e2.
+    elim (app_inj_tail H1) => e1 e2.
+    dependent destruction e2.
     have Htmp : s1 = s4 by apply: IH. subst s4.
     by rewrite E in H2; case: H2.
 Qed.
@@ -816,9 +789,16 @@ elim: que2 => [| q qs IH].
     move => {IH H Hsize2}.
     elim: H1 => [ss H].
     rewrite -!cats1 in H.
-    elim: (MatC_elim H) => s1 [H1 H2].
-    by firstorder.
+    elim: (MatC_elim_bis H); by firstorder.
 Qed.
+
+(* TODO this should go somewhere *)
+(*Lemma sum_elim (X : 'I_n -> Type) (a : nSum X) :
+  exists i (x : X i), a = inj x.
+Proof.
+rewrite /inj.
+by destruct a; eauto.
+Qed.*)
 
 Lemma Mat_cat k que1 que2 ans1 ans2 s s1 s2 :
   Matches k (que1 ++ que2) (ans1 ++ ans2) s s2 -> 
@@ -846,7 +826,8 @@ elim/last_ind : que2 => [| qs q IH].
     move => H2 H1.
     rewrite -!cats1.
     rewrite -!rcons_cat -!cats1 in H2.
-    elim: (MatC_elim H2) => s1' [E H].
+    elim: (MatC_elim_bis H2) => i [a' [b' [s1' [eq [eb [E H]]]]]].
+    subst q b.
     have Htmp := (IH _ _ _ _ H H1); move => {IH H H1}.
     by apply: MatchesC; eauto.
 Qed.
@@ -858,11 +839,11 @@ Lemma Mat_trans k que1 que2 ans1 ans2 s s1 s2 :
 Proof.
 move => H1 H2. move: H1. elim: H2.
 - by rewrite !cats0.
-- move => {que2 ans2 s1 s2} a b s1 que2 ans2 s2 s3 e H2 IH H1.
+- move => i {que2 ans2 s1 s2} a b s1 que2 ans2 s2 s3 e H2 IH H1.
   have H := IH H1. move => {H1 H2 IH}.
   rewrite !catA.
   by apply: MatchesC; eauto.
-Qed.  
+Qed.
 
 End Matches.
 
@@ -878,9 +859,9 @@ Variable Guar : relation (S * S').
 
 Definition TR2gen : StateTRtype S S' :=
   fun X X' (R : Rel X X') (tx : State S X) (tx' : State S' X') => 
-    forall s s',
-      let (x, s1) := tx s in 
-      let (x',s1'):= tx' s' in 
+    forall s s' x x' s1 s1',
+      tx s = (x, s1) ->
+      tx' s' = (x', s1') ->
         (exists u', R x u') /\ (exists u, R u x') /\
         (Trans s s1) /\ (Trans' s' s1') /\
         (Rely (s, s') (s1, s1') ->
@@ -906,48 +887,65 @@ Definition TR2genacc : StateTRaccType S S'.
 exists TR2gen.
 split.
 - move => X X' R x x' Hxx'.
-  move => s s'. rewrite /valState /tval /=.
+  move => s s' x1 x1' s1 s1'.
+  rewrite /valState /tval /=.
+  case => ? ?; subst.
+  case => ? ?; subst.
   by firstorder.
 - move => X X' Y Y' Q R f f' t t' HQ Harr.
   move => s s'. rewrite /bindState /tbind /=.
+  move => y y' s2 s2'.
   case E1 : (t s) => [x1 s1].
   case E1' : (t' s') => [x1' s1'].
-  case E2 : (f x1 s1) => [x2 s2].
-  move E2' : (f' x1' s1') => [x2' s2'].
-  have Htmp := HQ s s'. rewrite E1 E1' in Htmp.
+  move => E2 E2'.
+  have Htmp := HQ s s' _ _ _ _ E1 E1'.
   case: Htmp => [[u1' H11] [[u1 H12] [H13 [H14 H15]]]].
   have Htran2 : Trans s s2.
-    have H := Harr _ _ H11 s1 s1'. rewrite E2 in H.
+    have Htmp := Harr _ _ H11 s1 s1'.
+    rewrite E2 in Htmp.
     destruct (f' u1' s1').
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
     by apply: (transitiveTrans H13); intuition.
   have Htran2' : Trans' s' s2'.
-    have H := Harr _ _ H12 s1 s1'. rewrite E2' in H.
+    have Htmp := Harr _ _ H12 s1 s1'.
+    rewrite E2' in Htmp.
     destruct (f u1 s1).
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
     by apply: (transitiveTrans' H14); intuition.
   split; [ | split; [ | split; [ | split]]] => //.
-  + have Htmp := Harr _ _ H11 s1 s1'. rewrite E2 in Htmp.
-    destruct (f' u1' s1'). by intuition.
-  + have Htmp := Harr _ _ H12 s1 s1'. rewrite E2' in Htmp.
-    destruct (f u1 s1). by intuition.
+  + have Htmp := Harr _ _ H11 s1 s1'.
+    rewrite E2 in Htmp.
+    destruct (f' u1' s1').
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
+    by intuition.
+  + have Htmp := Harr _ _ H12 s1 s1'.
+    rewrite E2' in Htmp. destruct (f u1 s1).
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
+    by intuition.
   + have H : Rely (s,s') (s2,s2') -> Rely (s,s') (s1,s1') /\ Rely (s1,s1') (s2,s2').
-      have Htmp := Harr _ _ H11 s1 s1'. rewrite E2 in Htmp.
+      have Htmp := Harr _ _ H11 s1 s1'.
+      rewrite E2 in Htmp.
       destruct (f' u1' s1').
       have Htmp' := Harr _ _ H12 s1 s1'.
       rewrite E2' in Htmp'.
       destruct (f u1 s1).
       move => Hrely.
-      have H := @antitransitiveRely _ _ s1 s1' s2 s2' Hrely.
+      have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
+      have H' := Htmp' _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp'}.
+      have Hanti := @antitransitiveRely _ _ s1 s1' s2 s2' Hrely.
       by intuition.
     move => Hrely2.
     have HQ1 : Q x1 x1' by intuition. move => {H11 H12}.
-    have Htmp := Harr _ _ HQ1 s1 s1'. rewrite E2 E2' in Htmp.
-    by firstorder.
+    have Htmp := Harr _ _ HQ1 s1 s1' _ _ _ _ E2 E2'.
+    split; first by firstorder.
+    by apply: (@transitiveGuar _ (s1,s1')); eauto; firstorder.
 Defined.
 End TR2gen.
 
 
 Definition TransPre :=
-  fun (ts ts1 : TestSet) (que1 : seq A) (ans1 : seq B) =>
+  fun (ts ts1 : TestSet)
+      (que1 : seq (nSum A)) (ans1 : seq (nSum B)) =>
     ts1.(arg) = None ->
     ts.(arg) = None /\
     size que1 = size ans1 /\
@@ -1000,8 +998,8 @@ move => s s1 q1 q2 a1 a2 H T1 T2.
 elim: (T1 H) => e11 [e12 [e13 e14]].
 elim: (T2 H) => e21 [e22 [e23 e24]].
 split.
-- apply: (@app_inv_head A s.(que)). by rewrite -e13 -e23.
-- apply: (@app_inv_tail B s1.(ans)). by rewrite -e14 -e24.
+- apply: (@app_inv_head _ s.(que)). by rewrite -e13 -e23.
+- apply: (@app_inv_tail _ s1.(ans)). by rewrite -e14 -e24.
 Qed.
 
 Lemma seq_size_ind T (P : seq T -> Type) :
@@ -1075,7 +1073,8 @@ pose Rely : relation (TestSet * S) := fun (p p' : TestSet * S) =>
     ts1.(arg) = None /\
     forall que ans, TransPre ts ts1 que ans ->
       exists s1, Matches k que ans s s1.
-have HantitransRely : @antitransitiveRelyGuar _ _ Trans Trans' Rely Guar.
+have HantitransRely :
+  @antitransitiveRelyGuar _ _ Trans Trans' Rely Guar.
   move => tss0 ss0 tss1 ss1 tss2 ss2 Hrely2 Htran1 Htran2 _ _.
   have Hrely1 : Rely (tss0, ss0) (tss1, ss1).
     elim: Hrely2 => Hcal2 Himp2.
@@ -1117,37 +1116,45 @@ have HantitransRely : @antitransitiveRelyGuar _ _ Trans Trans' Rely Guar.
     by apply: Mat_cat; eauto.
 pose TR2 := @TR2genacc _ _ Trans Trans' Rely Guar HreflTrans HtransTrans HreflTrans' HtransTrans' HreflGuar HtransGuar HantitransRely.
 have Harr := Hpure _ _ TR2.
-have Hargs : (@IdR _ =R=> StateTR TR2 (@IdR _)) kTest k.
-  move => x x'. elim. rewrite /TR2 /= /TR2gen.
+have Hargs :
+  nProdR (fun i => @IdR _ =R=> StateTR TR2 (@IdR _)) kTest k.
+  destruct k as [k].
+  move => i x x'. elim. rewrite /TR2 /= /TR2gen.
   move => ts0 ss0.
-  move E : (kTest x ts0) => p. move: E; case: p => xx1 ts1 E1.
-  move E : (k x ss0) => p. move: E; case: p => xx1' ss1 E1'.
+  move E : (proj i kTest x ts0) => p.
+  move: E; case: p => xx1 ts1 /= E1.
+  move => ? xx1' ? ss1 H E1'.
+  rewrite E1 in H; symmetry in H; inversion H; subst; clear H.
   have Htran1 : Trans ts0 ts1.
     rewrite /Trans.
-    exists [::x]. exists [::xx1].
-    rewrite /TransPre.
-    move => H. rewrite /kTest in E1.
-    case e : (ts0.(arg)) => [a |].
-    - rewrite e in E1. case: E1 => _ e2. rewrite e2 in e.
-      by rewrite e in H.
-    - rewrite e in E1.
-      case Ea : (ts0.(ans)) => [| aa aas ].
-      + rewrite Ea in E1 => {Ea}. case: E1 => _ e2.
-        by rewrite -e2 in H.
-      + rewrite Ea in E1. case: E1 => e1 e2. by rewrite e1 -e2 /=.
+    case e : (ts0.(arg)) => [a |]; rewrite e in E1.
+    - case: E1 => _ e2.
+      exists [:: inj x], [:: inj xx1].
+      move => H.
+      by rewrite -e2 e in H.
+    - case Ea : (ts0.(ans)) => [| aa aas ]; rewrite Ea in E1.
+      + case: E1 => _ e2.
+        exists [:: inj x], [:: inj xx1].
+        move => H. by rewrite -e2 in H.
+      + case: E1 => _ e2.
+        exists [:: inj x], [:: aa].
+        move => H.
+        by rewrite -e2 /=.
   split; [| split; [| split; [| split ]]] => //.
   - by exists xx1.
   - by exists xx1'.
   - move => Hrely1. rewrite /Rely in Hrely1.
     elim: Hrely1 => Hcal1 Hrely1.
-    have Hcal0 : ts0.(arg) = None by firstorder.
+    have Hcal0 : ts0.(arg) = None
+      by clear - Htran1 Hcal1; firstorder.
+    rewrite Hcal0 in E1.
     have Ektest := E1. move: E1' => Ek.
-    rewrite /kTest Hcal0 in E1.
+    rewrite /kTest in E1.
     rewrite /Trans in Htran1. elim: Htran1 => [q1 [a1 Htran1]].
     case Ea : (ts0.(ans)) => [| aa aas].
     + rewrite Ea in E1. case: E1 => _ e2. by rewrite -e2 in Hcal1.
     + rewrite Ea in E1. case: E1 => e1 e2.
-      rewrite e1 in Ea => {e1}.
+      (*rewrite e1 in Ea => {e1}.*)
       move: (Htran1 Hcal1) => Htmp.
       rewrite -e2 /= in Htmp.
       elim: Htmp => [_ [Hsize [Eqs Ea2]]].
@@ -1155,9 +1162,8 @@ have Hargs : (@IdR _ =R=> StateTR TR2 (@IdR _)) kTest k.
       move: (app_inv_tail Ea) => {Ea} Ea.
       subst a1. rewrite /= in Hsize.
       have Htmp : exists q, q1 = [::q].
-        elim: (destruct_seq q1) => [[h [t H]] |];
-          last by move => e; rewrite e in Hsize.
-        rewrite H /= in Hsize.
+        elim: (destruct_seq q1) => [[h [t H]] |]; last by move => e; rewrite e in Hsize.
+        rewrite H  /= in Hsize.
         rewrite (size0nil (eq_add_S _ _ Hsize)) in H.
         by exists h.
       elim: Htmp => q ?. subst q1. move => {Hsize}.
@@ -1167,17 +1173,22 @@ have Hargs : (@IdR _ =R=> StateTR TR2 (@IdR _)) kTest k.
       have Htmp := Hmat'.
       rewrite -[X in Matches _ X _]cat0s in Htmp.
       rewrite -[X in Matches _ _ X]cat0s in Htmp.
-      elim: (MatC_elim Htmp) => {Htmp} ss0' [Hkss0' Hmat0].
-      have E0 := (MatN_elim Hmat0). subst ss0'. move => {Hmat0}.
-      rewrite Hkss0' in Ek. move => {Hkss0'}.
-      case: Ek. move => ? ?. subst xx1' ss1'.
+      elim: (MatC_elim_bis Htmp)
+        => {Htmp} j [ax [bx [ss0' [ex [? [Hkss0' Hmat0]]]]]].
+      rewrite /= in Hkss0'.
+      dependent destruction ex.
+      have E0 := (MatN_elim Hmat0) => {Hmat0}; subst ss0'.
+      rewrite Hkss0' in Ek => {Hkss0'}.
+      case: Ek => ? ?; subst xx1' ss1'.
+      subst; rewrite /= pick_b_eq.
       split; first by [].
-      rewrite /Guar. by exists [:: x], [:: xx1].
+      rewrite /Guar.
+      by exists [:: inj ax], [:: inj bx].
 move => ds ts res s s1 s2 v Hf Hmat Ecal Hres.
-have Htmp := Harr _ _ Hargs (initTest ds) s => {Harr Hargs}.
-rewrite Hf Hres in Htmp.
+have Htmp := Harr _ _ Hargs (initTest ds) s _ _ _ _ Hf Hres
+  => {Harr Hargs}.
 elim: Htmp => [_ [_ [Htrans [_ Himp]]]].
-elim: (Htrans) => qqs [aas Htranpre].
+elim: Htrans => qqs [aas Htranpre].
 have Hrely : Rely (initTest ds, s) (ts, s2).
   rewrite /Rely.
   split => [// | qqs' aas' Htran' ].
@@ -1226,9 +1237,9 @@ Variable State2 : S -> S' -> Prop.
 
 Definition TR3gen : StateTRtype S S' :=
   fun X X' (R : Rel X X') (tx : State S X) (tx' : State S' X') => 
-    forall s s',
-      let (x, s1) := tx s in 
-      let (x',s1'):= tx' s' in 
+    forall s s' x x' s1 s1',
+      tx s = (x, s1) -> 
+      tx' s' = (x',s1') ->
         (exists u', R x u') /\ (exists u, R u x') /\
         (Trans s s1) /\ (Trans' s' s1') /\ 
         (State1 s s' -> State1 s1 s1' /\ R x x' \/ State2 s1 s1').
@@ -1246,38 +1257,48 @@ Definition TR3genacc : StateTRaccType S S'.
 exists TR3gen.
 split.
 - move => X X' R x x' Hxx'.
-  move => s s'. rewrite /valState /tval /=.
+  move => s s' x1 x1' s1 s1'.
+  rewrite /valState /tval /=.
+  case => ? ?; case => ? ?; subst.
   by firstorder.
 - move => X X' Y Y' Q R f f' t t' HQ Harr.
-  move => s s'. rewrite /bindState /tbind /=.
+  move => s s' x2 x2' s2 s2'. rewrite /bindState /tbind /=.
   case E1 : (t s) => [x1 s1].
   case E1' : (t' s') => [x1' s1'].
-  case E2 : (f x1 s1) => [x2 s2].
-  move E2' : (f' x1' s1') => [x2' s2'].
-  have Htmp := HQ s s'. rewrite E1 E1' in Htmp.
+  move => E2 E2'.
+  have Htmp := HQ s s' _ _ _ _ E1 E1'.
   case: Htmp => [[u1' H11] [[u1 H12] [H13 [H14 H15]]]].
   split; [| split; [| split; [| split ]]].
-  + have Htmp := Harr _ _ H11 s1 s1'. rewrite E2 in Htmp.
-    destruct (f' u1' s1'). by intuition.
-  + have Htmp := Harr _ _ H12 s1 s1'. rewrite E2' in Htmp.
-    destruct (f u1 s1). by intuition.
-  + have H := Harr _ _ H11 s1 s1'. rewrite E2 in H.
+  + have Htmp := Harr _ _ H11 s1 s1'.
+    rewrite E2 in Htmp.
     destruct (f' u1' s1').
-    by apply: (transitiveTrans H13); intuition.
-  + have H := Harr _ _ H12 s1 s1'. rewrite E2' in H.
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
+    by intuition.
+  + have Htmp := Harr _ _ H12 s1 s1'. rewrite E2' in Htmp.
     destruct (f u1 s1).
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
+    by intuition.
+  + have Htmp := Harr _ _ H11 s1 s1'. rewrite E2 in Htmp.
+    destruct (f' u1' s1').
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
+    by apply: (transitiveTrans H13); intuition.
+  + have Htmp := Harr _ _ H12 s1 s1'. rewrite E2' in Htmp.
+    destruct (f u1 s1).
+    have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
     by apply: (transitiveTrans' H14); intuition.
   + move => Hstate10.
-    elim: (H15 Hstate10) => [[Hstate11 Q1] | Hstate21 ].
-    * have Htmp := Harr _ _ Q1 s1 s1'. rewrite E2 E2' in Htmp.
+    elim: (H15 Hstate10) => [[Hstate11 Q1] | Hstate21].
+    * have Htmp := Harr _ _ Q1 s1 s1' _ _ _ _ E2 E2'.
       by intuition.
     * have Htran12 : Trans s1 s2.
         have Htmp := Harr _ _ H11 s1 s1'.
         rewrite E2 in Htmp. destruct (f' u1' s1').
+        have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
         by intuition.
       have Htran12' : Trans' s1' s2'.
         have Htmp := Harr _ _ H12 s1 s1'.
         rewrite E2' in Htmp. destruct (f u1 s1).
+        have H := Htmp _ _ _ _ Logic.eq_refl Logic.eq_refl => {Htmp}.
         by intuition.
       right. by apply: (stepState2 Hstate21).
 Defined.
@@ -1349,62 +1370,61 @@ pose TR3 := @TR3genacc _ _ Trans Trans' State1 State2
              Hstep2.
 have Harr := Hpure _ _ TR3.
 move => a ts res ts1 res1 Hf0 Earg Hf1.
-have Hargs : (@IdR _ =R=> StateTR TR3 (@IdR _)) kTest kTest.
-  clear - a => {a}.
-  move => x x'. elim. rewrite /TR3 /= /TR3gen.
+have Hargs : nProdR (fun i => @IdR _ =R=> StateTR TR3 (@IdR _)) kTest kTest.
+  clear - b.
+  move => i x x'. elim. rewrite /TR3 /= /TR3gen.
   move => tss tss'.
-  case E1 : (kTest x tss) => [xx1 tss1].
-  case E1' : (kTest x tss') => [xx1' tss1'].
+  move => xx1 xx1' tss1 tss1' E1 E1'.
   split; [| split; [| split; [| split ]]].
   - by exists xx1.
   - by exists xx1'.
   - rewrite /Trans.
     split; [| split].
-    + move => H. rewrite /kTest in E1.
+    + move => H.
       case e : tss.(arg) => [a |] //.
-      rewrite e in E1. case: E1 => _ e2. rewrite e2 in e.
-      by rewrite e in H.
-    + move => [a H]. rewrite /kTest in E1.
+      rewrite e in E1. case: E1 => _ e2.
+      by rewrite -e2 e in H.
+    + move => [a H].
       rewrite H in E1. by case: E1.
-    + move => H. rewrite /kTest in E1.
-      case e : tss.(arg) => [a |].
-      * rewrite e in E1. left. by case: E1.
-      * rewrite e H in E1. right.
+    + move => H.
+      case e : tss.(arg) => [a |]; rewrite e in E1.
+      * left; by case: E1.
+      * rewrite H in E1. right.
         case: E1 => _ E1. by rewrite -E1 /=; eauto.
   - rewrite /Trans' /Trans.
     split; [| split].
-    + move => H. rewrite /kTest in E1'.
+    + move => H.
       case e : tss'.(arg) => [a |] //.
       rewrite e in E1'. case: E1' => _ e2. rewrite e2 in e.
       by rewrite e in H.
     + move => [a H]. rewrite /kTest in E1'.
       rewrite H in E1'. by case: E1'.
-    + move => H. rewrite /kTest in E1'.
+    + move => H.
       case e : tss'.(arg) => [a |].
       * rewrite e in E1'. left. by case: E1'.
       * rewrite e H in E1'. right.
         case: E1' => _ E1'. by rewrite -E1' /=; eauto.
   - move => Hstate.
     rewrite /State1 in Hstate. elim: Hstate => [e1 [e2 [e3 e4]]].
-    rewrite /kTest in E1. rewrite e1 in E1.
+    rewrite e1 in E1.
     case: (destruct_seq tss.(ans)); last first
       => [Hans | [hb [tb Hans]]].
     + rewrite Hans in E1. rewrite Hans cat0s in e3.
       case: E1 => _ E1.
-      rewrite /kTest in E1'. rewrite e2 e3 /= in E1'.
+      rewrite e2 e3 /= in E1'.
       case: E1' => _ E1'.
       right. rewrite /State2.
-      by rewrite -E1 -E1' e4 /=; exists x.
+      by rewrite -E1 -E1' e4 /=; exists (inj x).
     + rewrite Hans /= in E1.
-      case: E1 => e E1. subst hb.
+      case: E1 => ehb E1.
       have e : tb = tss1.(ans) by rewrite -E1. subst tb.
       rewrite /State1.
-      rewrite /kTest in E1'. rewrite e2 e3 Hans /= in E1'.
+      rewrite e2 e3 Hans /= in E1'.
       case: E1' => e' E1'. subst xx1'.
       left. by rewrite -E1 -E1' e4.
 have Htmp := Harr _ _ Hargs (initTest bs) (initTest (bs ++ [::b])).
-rewrite Hf0 Hf1 in Htmp.
-elim: Htmp => [_ [_ [_ [Htran' Himp]]]].
+have H := Htmp _ _ _ _ Hf0 Hf1 => {Htmp}.
+elim: H => [_ [_ [_ [Htran' Himp]]]].
 have Hstate1 : State1 (initTest bs) (initTest (bs ++ [:: b]))
   by [].
 elim: (Himp Hstate1) => [[[Habs _] _] | Hstate2].
@@ -1413,7 +1433,6 @@ elim: (Himp Hstate1) => [[[Habs _] _] | Hstate2].
   elim: Hstate2 => a0 [E Hstate2].
   inversion_clear E. by intuition.
 Qed.
-
 
 Theorem FunTreeFun_gen
           (F : FuncType A B C) (Hpure : isPure F) S k :
@@ -1427,7 +1446,7 @@ Theorem FunTreeFun_gen
           c1 = c2 /\ s1 = s2.
 Proof.
 move => ds t; move: ds.
-elim: t => [c | a f IH].
+elim: t => [c | i a f IH].
 - move => bbs HfunAns.
   elim: (Fun2Tree_Ans_elim HfunAns) => [r [e1 e2]] {HfunAns}.
   move => s sch aas c0 r0 Hf Hque Hmat.
@@ -1446,12 +1465,12 @@ elim: t => [c | a f IH].
   rewrite Hf in e1.
   case: e1 => ? ?; subst c0 r0.
   case E1 : (F S k s) => [c1 s1].
-  case E2 : (tree2fun (Que a f) k sch) => [c2 s2].
+  case E2 : (tree2fun (Que _ a f) k sch) => [c2 s2].
   rewrite /= /bindState /tbind /= in E2.
-  case Ek : (k a sch) => [b s2']. rewrite Ek in E2.
-  have Hmat2 : Matches k (que r ++ [:: a]) (bbs ++ [:: b]) s s2'
+  case Ek : (proj i k a sch) => [b s2']. rewrite Ek in E2.
+  have Hmat2 : Matches k (que r ++ [:: inj a]) (bbs ++ [:: inj b]) s s2'
     by apply: MatchesC; eauto.
-  case E : (F TestSet kTest (initTest (bbs ++ [:: b])))
+  case E : (F TestSet kTest (initTest (bbs ++ [:: inj b])))
     => [c' ts'].
   have Htmp := IH b _ (H b) _ _ _ _ _ E _ Hmat2.
   have Hcase := (LemStepCase Hpure Hf e2) E.
@@ -1477,11 +1496,10 @@ pose TR := @TRtransacc _ _ Trans Trans'
              HreflTrans HtransTrans
              HreflTrans' HtransTrans'.
 have Harr := Hpure _ _ TR.
-have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTest kTest.
-  move => x x'. elim. rewrite /TR /= /TRtrans /=.
+have Hargs : nProdR (fun i => @IdR _ =R=> StateTR TR (@IdR _)) kTest kTest.
+  move => i x x'. elim. rewrite /TR /= /TRtrans /=.
   move => ts ts'.
-  case E : (kTest x ts) => [x1 ts1].
-  case E' : (kTest x ts') => [x1' ts1'].
+  move => x1 x1' ts1 ts1' E E'.
   split; [| split; [| split; [| split ]]] => //.
   - by exists x1.
   - by exists x1'.
@@ -1492,9 +1510,10 @@ have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTest kTest.
     + rewrite H1 in E. case: E => _ e2. by rewrite -e2 H2.
 have Htmp := Harr _ _ Hargs (initTest [::]) (initTest ([::])).
 move => {Harr Hargs}.
-move => ts v H. rewrite H in Htmp.
-elim: Htmp => [_ [_ [Htmp _]]].
-rewrite /Trans in Htmp. by intuition.
+move => ts v Hf.
+have H := Htmp _ _ _ _ Hf Hf => {Htmp}.
+elim: H => [_ [_ [H _]]].
+rewrite /Trans in H. by intuition.
 Qed.
 
 Theorem FunTreeFun (F : FuncType A B C) (Hpure : isPure F) S k :
@@ -1518,33 +1537,37 @@ Qed.
     | Que x k, b :: bs => subtree (k b) bs
   end.*)
 
-
 Record TestISet := mkTestI
-  { argI : option A;
-    queI : seq A;
-    ansI : Stream B }.
+  { argI : option (nSum A);
+    queI : seq (nSum A);
+    ansI : Stream (nSum B) }.
 
-Definition initTestI (bs : Stream B) : TestISet :=
+Definition initTestI (bs : Stream (nSum B)) : TestISet :=
   {| argI := None;
      queI := nil;
      ansI := bs |}.
 
-Definition kTestI : A -> State TestISet B := 
-  fun a s =>
-    match s.(argI) with
-      | Some _ => (botB, s)
-      | None =>
-          match s.(ansI) with
-            | Nil =>
-                (botB, {| argI := Some a;
-                          queI := s.(queI);
-                          ansI := Nil |})
-            | Cons b bs =>
-                (b, {| argI := s.(argI);
-                       queI := (s.(queI) ++ [::a]);
-                       ansI := bs |})
-          end
-    end.
+Definition kTestI : nProd (fun i => A i -> State TestISet (B i)) :=
+  tuple (
+      fun i =>
+        fun a s =>
+          match s.(argI) with
+            | Some _ => (botB i, s)
+            | None =>
+                match s.(ansI) with
+                  | Nil =>
+                      (botB i, {| argI := Some (inj a);
+                                  queI := s.(queI);
+                                  ansI := Nil |})
+                  | Cons b bs =>
+                      let j := projT1 b in
+                      let bj := projT2 b in
+                      let b' := pick_b i bj in 
+                        (b', {| argI := s.(argI);
+                                queI := s.(queI) ++ [:: inj a];
+                                ansI := bs |})
+                end
+          end).
 
 Coercion TestToTestI (s : TestSet) : TestISet :=
   {| argI := s.(arg);
@@ -1561,26 +1584,22 @@ pose P : Rel TestSet TestISet
   := fun r ri => (r : TestISet) = ri.
 pose TR := TRparamAcc P.
 have Harr := Hpure _ _ TR.
-have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTest kTestI.
-  move => x x'. elim => {x'}.
+have Hargs : nProdR (fun i => @IdR _ =R=> StateTR TR (@IdR _)) kTest kTestI.
+  move => i x x'. elim => {x'}.
   rewrite /TR /TRparamAcc /= /TRparam.
   move => r r' Hrr'.
   rewrite /P in Hrr'. subst r'.
-  case e: (kTest x r) => [c1 s1].
-  case e': (kTestI x r) => [c1' s1'].
-  rewrite /kTest in e. rewrite /kTestI in e'.
+  case e: (proj i kTest x r) => [c1 s1].
+  case e': (proj i kTestI x r) => [c1' s1'].
+  rewrite /kTest /= in e. rewrite /kTestI /= in e'.
   have Harg : r.(arg) = r.(argI) by [].
   have Hans : seqToStream r.(ans) = r.(ansI) by [].
-  rewrite -Harg in e' => {Harg}.
+  rewrite -Harg -Hans /= => {Harg Hans}.
   case Earg : (arg r) => [a |]; rewrite Earg in e e' => {Earg}.
   - by case: e; elim; elim; case: e'; elim; elim.
-  - rewrite -Hans in e'.
-    case Eans : r.(ans) => [| a aas]; rewrite Eans /= in e e'.
+  - case Eans : r.(ans) => [| a aas]; rewrite Eans /= in e e'.
     + by case: e; elim; elim; case: e'; elim; elim.
-    + case: e => ? e; subst c1.
-      case: e' => ? e'; subst c1'.
-      split => //.
-      by rewrite -e -e'.
+    + by case: e => ? ?; subst; case: e' => ? ?; subst.
 move => r.
 have Hrr : P r r by [].
 have Htmp := Harr _ _ Hargs r r Hrr => {Harr Hargs Hrr}.
@@ -1616,17 +1635,15 @@ pose Inv : relation TestISet := fun s s' => s = s'.
 pose TR := @TR1genacc _ _ Trans Trans' Inv
             HreflTrans HtransTrans HreflTrans' HtransTrans'.
 have Harr := Hpure _ _ TR.
-have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTestI kTestI.
-  move => x x'. elim => {x'}.
+have Hargs : nProdR (fun i => @IdR _ =R=> StateTR TR (@IdR _)) kTestI kTestI.
+  move => i x x'. elim => {x'}.
   rewrite /TR /= /TR1gen.
   move => s s'.
-  case E1 : (kTestI x s) => [x1 s1].
-  case E1' : (kTestI x s') => [x1' s1'].
+  move => x1 x1' s1 s1' E1 E1'.
   split; [| split; [| split; [| split ]]] => //.
   - by exists x1.
   - by exists x1'.
   - rewrite /Trans.
-    rewrite /kTestI in E1.
     split.
     + move => Harg; rewrite Harg in E1.
       move: E1; case: (ansI s) => [| b bs] /=;
@@ -1639,7 +1656,7 @@ have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTestI kTestI.
     by rewrite E1 in E1'; case: E1'.
 move => bs c s Hf.
 have Htmp := Harr _ _ Hargs (initTestI bs) (initTestI bs).
-rewrite Hf in Htmp.
+have H := Htmp _ _ _ _ Hf Hf => {Htmp}.
 by firstorder.
 Qed.
 
@@ -1674,17 +1691,15 @@ pose Inv : relation TestISet := fun s s' => s = s'.
 pose TR := @TR1genacc _ _ Trans Trans' Inv
             HreflTrans HtransTrans HreflTrans' HtransTrans'.
 have Harr := Hpure _ _ TR.
-have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTestI kTestI.
-  move => x x'. elim => {x'}.
+have Hargs : nProdR (fun i => @IdR _ =R=> StateTR TR (@IdR _)) kTestI kTestI.
+  move => i x x'. elim => {x'}.
   rewrite /TR /= /TR1gen.
   move => s s'.
-  case E1 : (kTestI x s) => [x1 s1].
-  case E1' : (kTestI x s') => [x1' s1'].
+  move => x1 x1' s1 s1' E1 E1'.
   split; [| split; [| split; [| split ]]] => //.
   - by exists x1.
   - by exists x1'.
   - rewrite /Trans.
-    rewrite /kTestI in E1.
     move: E1; case: (argI s) => [a |].
     + case => _ ?; subst s1.
       by exists [::], [::]; rewrite cats0.
@@ -1692,13 +1707,13 @@ have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTestI kTestI.
       * case => _ ?; subst s1 => /=.
         by exists [::], [::]; rewrite cats0.
       * case => _ ?; subst s1 => /=.
-        by exists [::b], [::x].
+        by exists [:: b], [:: inj x].
   - rewrite /Inv /IdR. move => ?; subst s'.
     by rewrite E1 in E1'; case: E1'.
 move => bs c r Hf.
 have Htmp := Harr _ _ Hargs (initTestI bs) (initTestI bs).
-rewrite Hf in Htmp.
-elim: Htmp => [_ [_ [H _]]].
+have H := Htmp _ _ _ _ Hf Hf => {Htmp}.
+elim: H => [_ [_ [H _]]].
 clear - H.
 rewrite /Trans /= in H.
 case: H => [bb [aa H]].
@@ -1725,17 +1740,18 @@ Definition sim r rI bs
      r.(que) = rI.(queI) /\
      catSeqStream r.(ans) bs = rI.(ansI).
 
-Lemma sim_kTest r rI b bs bsI a (Hne : ~ bsI = Nil) :
+Lemma sim_kTest i r rI b bs bsI a (Hne : ~ bsI = Nil) :
   sim r rI bsI ->
   r.(ans) = b :: bs ->
-  fst (kTest a r) = fst (kTestI a rI).
+  fst (proj i kTest a r) = fst (proj i kTestI a rI).
 Proof.
 elim: (not_Nil_Cons Hne) => b' [bsI' H].
 move => [e1 [e2 e3]] Eans.
-case E1 : (kTest a r) => [b1 r1].
-case E1' : (kTestI a rI) => [b1' rI1'].
-rewrite /kTest in E1.
-rewrite /kTestI in E1'.
+case E1 : (proj i kTest a r) => [b1 r1].
+case E1' : (proj i kTestI a rI) => [b1' rI1'].
+rewrite /=.
+rewrite /kTest /= in E1.
+rewrite /kTestI /= in E1'.
 case Earg: (arg r) => [a0 |].
 - rewrite Earg in E1.
   rewrite -e1 Earg in E1'.
@@ -1747,13 +1763,13 @@ case Earg: (arg r) => [a0 |].
      case: E1' => ? ?; subst b1' rI1'.
 Qed.
 
-Lemma Infinite_kTestI a r r1 b1 :
-  kTestI a r = (b1, r1) ->
+Lemma Infinite_kTestI i a r r1 b1 :
+  proj i kTestI a r = (b1, r1) ->
   Infinite (r.(ansI)) ->
   Infinite (r1.(ansI)).
 Proof.
 move => H Hinf.
-rewrite /kTestI in H.
+rewrite /kTestI /= in H.
 case Harg : (r.(argI)) => [a0 |].
 - rewrite Harg in H.
   by case: H => _ ?; subst r1.
@@ -1786,8 +1802,8 @@ pose Trans' : relation TestISet := fun r r1 =>
   size r.(queI) <= size r1.(queI).
 have HreflTrans' : reflexive _ Trans'
   by have H := leqnn; firstorder.
-have HtransTrans' : transitive _ Trans'
-  by have H := leq_trans; firstorder.
+have HtransTrans' : transitive _ Trans'.
+  by clear - F; have H := leq_trans; firstorder.
 pose State1 : TestSet -> TestISet -> Prop
   := fun r r' =>
        r.(arg) = None /\
@@ -1818,11 +1834,10 @@ pose TR := @TR3genacc _ _ Trans Trans' State1 State2
              HreflTrans HtransTrans HreflTrans' HtransTrans'
              Hstep2.
 have Harr := Hpure _ _ TR.
-have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTest kTestI.
-  move => x x'. elim => {x'}. rewrite /TR /= /TR3gen.
+have Hargs : nProdR (fun i => @IdR _ =R=> StateTR TR (@IdR _)) kTest kTestI.
+  move => i x x'. elim => {x'}. rewrite /TR /= /TR3gen.
   move => ts ts'.
-  case E1 : (kTest x ts) => [b1 ts1].
-  case E1' : (kTestI x ts') => [b1' ts1'].
+  move => b1 b1' ts1 ts1' E1 E1'.
   split; [| split; [| split; [| split ]]].
   - by exists b1.
   - by exists b1'.
@@ -1844,7 +1859,7 @@ have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTest kTestI.
     elim: Hstate => [e1 Hsim].
     case: (Hsim) => [e3 [e4 e5]].
     have Hb := sim_kTest x Hne Hsim => {Hsim}.
-    rewrite E1 E1' /= in Hb.
+    rewrite /= E1 E1' /= in Hb.
     rewrite /kTest in E1. rewrite e1 in E1.
     case Hans : (ts.(ans)) => [| hb tb].
     + right.
@@ -1860,22 +1875,22 @@ have Hargs : (@IdR _ =R=> StateTR TR (@IdR _)) kTest kTestI.
       rewrite Hans /= in E1.
       have eb : b1 = b1' by apply: Hb; eauto.
       subst b1' => {Hb}. split => //.
-      case: E1 => ? E1; subst hb.
+      case: E1 => ehb E1.
       have e : tb = ts1.(ans) by rewrite -E1. subst tb.
       rewrite /State1.
       rewrite /kTestI in E1'.
-      elim: (not_Nil_Cons Hne) => hb [tb EansI].
+      elim: (not_Nil_Cons Hne) => hb1 [tb1 EansI].
       rewrite -e3 e1 -e5 Hans /= in E1'.
-      case: E1' => ?; subst ts1'.
+      case: E1' => _ ?; subst ts1'.
       by rewrite -E1 /sim -e4 /=.
 move => Hf Hf'.
 have Htmp := Harr _ _ Hargs
                   (initTest bs)
                   (initTestI (catSeqStream bs bsI)).
-rewrite Hf Hf' in Htmp.
+have H := Htmp _ _ _ _ Hf Hf' => {Htmp}.
 have Hst1 : State1 (initTest bs) (initTestI (catSeqStream bs bsI))
   by [].
-case: Htmp => [_ [_ [_ [_ Himp]]]].
+case: H => [_ [_ [_ [_ Himp]]]].
 have Htmp := Himp Hst1 => {Himp Hst1}.
 clear - Htmp.
 rewrite /State1 /State2 in Htmp; by intuition.
@@ -1886,7 +1901,7 @@ Qed.
 Hypothesis tree_not_exists_cex :
   forall (F : FuncType A B C) (Hpure : isPure F),
     ~ (exists t, Fun2Tree F [::] t) ->
-    exists (d : Stream B),
+    exists (d : Stream (nSum B)),
       Infinite d /\
       forall n c s,
         F _ kTest (initTest (firstN n d)) = (c,s) ->

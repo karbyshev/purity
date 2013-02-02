@@ -52,6 +52,14 @@ Definition nProdR (X : 'I_n -> Type) (X' : 'I_n -> Type)
          forall i, R i (f i) (f' i).
 End nProd.
 
+Section nSum.
+Variable n : nat.
+
+Definition nSum (X : 'I_n -> Type) : Type := sigT X.
+
+Definition inj (X : 'I_n -> Type) i x : nSum X := existT _ i x.
+End nSum.
+
 Infix " =R=> " := ArrR (at level 55).
 Infix " *R* " := ProdR (at level 55).
 
@@ -99,3 +107,49 @@ Notation TRtype := Acceptable.TRtype.
 Notation TRaccType := Acceptable.TRacc.
 Notation TR := Acceptable.TR.
 Notation Acc :=  Acceptable.axiomAcc.
+
+Module StateAcceptable.
+Section axiom.
+Variables S S' : Type.
+Definition TRtype
+  := forall X X', Rel X X' -> Rel (State S X) (State S' X').
+
+Definition acceptableTR (TR : TRtype) : Prop :=
+  (forall X X' (R : Rel X X') (x : X) (x' : X'),
+    R x x' -> TR X X' R (valState x) (valState x')) /\
+    (forall X X' Y Y'
+    (Q : Rel X X') (R : Rel Y Y')
+    (f : X -> State S Y) (f' : X' -> State S' Y')
+    (tx : State S X) (tx' : State S' X'),
+    (TR X X' Q tx tx') -> (ArrR Q (TR Y Y' R) f f') -> TR Y Y' R (bindState tx f) (bindState tx' f')).
+End axiom.
+
+Record TRacc (S S' : Type) := mkTRacc {
+  TR :> TRtype S S';
+  axiomAcc :> acceptableTR TR
+}.
+
+End StateAcceptable.
+
+Notation StateTRtype := StateAcceptable.TRtype.
+Notation StateTRaccType := StateAcceptable.TRacc.
+Notation StateTR := StateAcceptable.TR.
+Notation StateAcc :=  StateAcceptable.axiomAcc.
+
+Definition TRparam (S S' : Type) (R : Rel S S') : StateTRtype S S'
+  := fun X X' Q =>  R =R=> (Q *R* R).
+
+Definition TRparamAcc (S S' : Type) (P : Rel S S') : StateTRaccType S S'.
+exists (TRparam P).
+split; first by intuition.
+move => X X' Y Y' Q R f f' tx tx' H Harr.
+move => s s' Hss'.
+rewrite /TRparam in H, Harr.
+case e1 : (tx s) => [x1 s1].
+case e1' : (tx' s') => [x1' s1'].
+have H1 := H _ _ Hss' => {Hss' H}.
+rewrite e1 e1' in H1.
+elim: H1 => [HQ HR].
+rewrite /bindState /tbind /= e1 e1'.
+by apply: Harr.
+Defined.

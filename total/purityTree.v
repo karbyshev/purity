@@ -43,14 +43,14 @@ End Strategy.
 Section TreeMonad.
 Variables A B : Type.
 
-Fixpoint subst X Y (t : Tree A B X) (g : X -> Tree A B Y) :=
+Fixpoint subst X Y (g : X -> Tree A B Y) (t : Tree A B X) :=
   match t with
     | Ans x => g x
-    | Que a f => Que a (fun b => subst (f b) g)
+    | Que a f => Que a (fun b => subst g (f b))
   end.
 
 Definition TreeM : monadType.
-exists (@Tree A B) (@Ans A B) subst.
+exists (@Tree A B) (@Ans A B) (fun _ _ t f => @subst _ _ f t).
 - by [].
 - rewrite /Monad.axiom1 => X.
   elim => [// | a f IH /=].

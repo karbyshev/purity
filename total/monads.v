@@ -106,4 +106,16 @@ exists
   now apply: functional_extensionality; case.
 Defined.
 
-
+Definition Maybe : monadType.
+exists
+  (fun X => option X)
+  (fun X => fun x => Some x)
+  (fun X Y => fun t f =>
+                match t with
+                  | None => None
+                  | Some x => f x
+                end).
+- by [].
+- rewrite /Monad.axiom1 => A; by case.
+- rewrite /Monad.axiom1 => A B C; by case.
+Defined.

@@ -183,3 +183,79 @@ apply: max_seq_spec.
 now apply: in_split_l.
 Qed.
 
+Definition instr' n (f : nat -> nat) : nat -> Maybe nat
+  := fun x => if x <= n then Some (f x) else None.
+
+Inductive modulus_option (F : FuncType nat nat bool) f : nat -> nat -> Prop :=
+| Modulus_None :
+    forall n m,
+      F _ (instr' n f) = None -> modulus_option F f (n.+1) m -> modulus_option F f n m
+| Modulus_Some :
+    forall n b, F _ (instr' n f) = Some b -> modulus_option F f n n.
+
+Lemma modulus_option_function (F : FuncType nat nat bool) f n m1 m2 :
+  modulus_option F f n m1 -> modulus_option F f n m2 -> m1 = m2.
+Proof.
+elim.
+- move => {n m1} n m1 Hf H1 H2 H3.
+  inversion H3; subst; clear H3; try rewrite H in Hf; by auto.
+- move => {n m1} n b Hf H2.
+  inversion H2; subst; clear H2; try rewrite H in Hf; by auto.
+Qed.
+
+Lemma modulus_option_spec1 (F : FuncType nat nat bool) f n m :
+  modulus_option F f n m -> n <= m.
+Proof.
+elim => //.
+- move => {n m} n m Hf H Hle. by apply: ltnW.
+Qed.
+
+Lemma modulus_option_spec2 f n m a k :
+  modulus_option (tree2fun (Que a k)) f n m -> a <= m.
+Proof.
+elim => //=.
+move => {n m} n b.
+case E: (instr' n f a) => [x |] => //=.
+move => _; rewrite /instr' in E.
+move: E; by case: (a <= n).
+Qed.
+
+Lemma modulus_option_spec3 t f n m :
+  modulus_option (tree2fun t) f n m ->
+  forall p, In p (deps t f) -> fst p <= m.
+Proof.
+move: n m.
+elim: t => [c | a k IH].
+- by [].
+- move => n m /= H [a' b] [e | i].
+  + case: e => ? ?; subst.
+    rewrite /=. by apply: modulus_option_spec2; eauto.
+  + apply: (IH); last by refine i.
+    move => {i a' b}.
+    elim: H; eauto.
+    move => {n m} n m /=.
+    case E: (instr' n f a) => [x |] => //=.
+    rewrite /instr' in E.
+    have le : a <= n by move: E; case: (a <= n).
+    rewrite le in E.
+    inversion E; clear dependent x.
+    move => H.
+    by refine (Modulus_Some H).
+Qed.
+
+Lemma modulus_option_corr (F : FuncType nat nat bool) (Hpure : is_pure F) f g m :
+  modulus_option F f 0 m ->
+  (forall i, i <= m -> f i = g i) ->
+  F Id f = F Id g.
+Proof.
+move => Hm H.
+pose t := proj1_sig Hpure.
+have Ht : F = tree2fun t by (apply: proj2_sig Hpure).
+rewrite !Ht.
+rewrite Ht in Hm.
+apply: (deps_val_compat eq_refl).
+move => [a b] i.
+apply: H.
+by apply: modulus_option_spec3; eauto.
+Qed.
+

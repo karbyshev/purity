@@ -231,7 +231,8 @@ Theorem tree2fun2tree : forall t, fun2tree (tree2fun t) =-= t.
 Proof.
 move => t. rewrite /fun2tree tree2fun_simpl.
 suff : Fcont_app (Fcont_app (tree2funT (Cont STree)) Que) Ans =-= Id.
-  move => H. have H1 := (fcont_eq_compat H (Oeq_refl t)) => {H}.
+  move => H.
+  have H1 := (fcont_eq_compat H (Oeq_refl t)) => {H}.
   by rewrite !Fcont_app_simpl in H1.
 clear t.
 rewrite -kleisli_unit id_min FIXP_simpl.

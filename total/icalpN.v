@@ -169,10 +169,24 @@ Definition initTest (bs : seq (nSum B)) : TestSet :=
      que := [::];
      ans := bs |}.
 
-(* TODO: prove decidability of ordinals *)
+Require Import EqNat.
+Require Import Logic.ProofIrrelevance.
+
 Lemma ord_is_decidable n (i j : 'I_n) :
   {i = j} + {i <> j}.
-Proof. admit. Qed.
+Proof.
+case: i => i Hi.
+case: j => j Hj.
+case: (eq_nat_decide i j) => [e | ne].
+- left.
+  have H := (eq_nat_eq _ _ e).
+  subst i.
+  have H : Hi = Hj by apply: proof_irrelevance.
+  by subst.
+- right.
+  have H : i <> j by move/eq_eq_nat.
+  by case.
+Qed.
 
 Definition pick_b i j (b : B j) : B i.
 elim: (ord_is_decidable i j) => [e | ne].

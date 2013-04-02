@@ -100,16 +100,27 @@ case (in_inv Hx) as [e | H].
   now apply: max_seq_aux_leq_accu.
 Qed.
 
-Fixpoint subtree A B C (t : Tree A B C) (path : list (A * B)) :=
+(* TODO: clean *)
+(*Fixpoint subtree A B C (t : Tree A B C) (path : list (A * B)) :=
   match t, path with
     | _, nil => Some t
     | Ans _, _ :: _ => None
     | Que x k, (_, b) :: ps => subtree (k b) ps
+  end.*)
+
+Fixpoint subtree A B C (t : Tree A B C) (path : list (A * B)) :=
+  match t, path with
+    | _, nil => t
+    | Que x k, (_, b) :: ps => subtree (k b) ps
+    | _, _ => t
   end.
 
+(*Lemma deps_subtree A B C (t : Tree A B C) sigma :
+  let c := evaltree t sigma in
+  subtree t (deps t sigma) = Some (@Ans A B C c).*)
 Lemma deps_subtree A B C (t : Tree A B C) sigma :
   let c := evaltree t sigma in
-  subtree t (deps t sigma) = Some (@Ans A B C c).
+  subtree t (deps t sigma) = @Ans A B C c.
 Proof.
 elim: t => [// | x k H].
 move => c. now firstorder.
@@ -258,4 +269,3 @@ move => [a b] i.
 apply: H.
 by apply: modulus_option_spec3; eauto.
 Qed.
-

@@ -100,7 +100,6 @@ case (in_inv Hx) as [e | H].
   now apply: max_seq_aux_leq_accu.
 Qed.
 
-(* TODO: clean *)
 (*Fixpoint subtree A B C (t : Tree A B C) (path : list (A * B)) :=
   match t, path with
     | _, nil => Some t
@@ -115,9 +114,6 @@ Fixpoint subtree A B C (t : Tree A B C) (path : list (A * B)) :=
     | _, _ => t
   end.
 
-(*Lemma deps_subtree A B C (t : Tree A B C) sigma :
-  let c := evaltree t sigma in
-  subtree t (deps t sigma) = Some (@Ans A B C c).*)
 Lemma deps_subtree A B C (t : Tree A B C) sigma :
   let c := evaltree t sigma in
   subtree t (deps t sigma) = @Ans A B C c.

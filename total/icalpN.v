@@ -1544,12 +1544,6 @@ have Hmat : Matches k [::] [::] s s by apply: MatchesN.
 by apply: FunTreeFun_gen; eauto.
 Qed.
 
-(*Fixpoint subtree A B C (t : Tree A B C) (path : seq B) :=
-  match t, path with
-    | _, nil => t
-    | Ans _, _ => t
-    | Que x k, b :: bs => subtree (k b) bs
-  end.*)
 
 Record TestISet := mkTestI
   { argI : option (nSum A);

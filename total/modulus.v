@@ -171,11 +171,11 @@ rewrite -/(deps_1 t f1) -deps_are_same in Hm.
 now apply: (@deps_val_compat _ _ _ _ m).
 Qed.
 
-Definition modulus_max (F : FuncType nat nat bool) f : nat
+Definition modulus_max B C (F : FuncType nat B C) f : nat
   := let args := fst (split (modulus F f)) in max_seq args.
 
-Lemma modulus_max_corr
-        (F : FuncType nat nat bool) (Hpure : is_pure F) f1 f2 m :
+Lemma modulus_max_corr B C
+        (F : FuncType nat B C) (Hpure : is_pure F) f1 f2 m :
   m = modulus_max F f1 ->
   (forall i, i <= m -> f1 i = f2 i) ->
   F Id f1 = F Id f2.
@@ -190,17 +190,17 @@ apply: max_seq_spec.
 now apply: in_split_l.
 Qed.
 
-Definition instr' n (f : nat -> nat) : nat -> Maybe nat
+Definition instr' B n (f : nat -> B) : nat -> Maybe B
   := fun x => if x <= n then Some (f x) else None.
 
-Inductive modulus_option (F : FuncType nat nat bool) f : nat -> nat -> Prop :=
+Inductive modulus_option B C (F : FuncType nat B C) f : nat -> nat -> Prop :=
 | Modulus_None :
     forall n m,
       F _ (instr' n f) = None -> modulus_option F f (n.+1) m -> modulus_option F f n m
 | Modulus_Some :
     forall n b, F _ (instr' n f) = Some b -> modulus_option F f n n.
 
-Lemma modulus_option_function (F : FuncType nat nat bool) f n m1 m2 :
+Lemma modulus_option_function B C (F : FuncType nat B C) f n m1 m2 :
   modulus_option F f n m1 -> modulus_option F f n m2 -> m1 = m2.
 Proof.
 elim.
@@ -210,15 +210,15 @@ elim.
   inversion H2; subst; clear H2; try rewrite H in Hf; by auto.
 Qed.
 
-Lemma modulus_option_spec1 (F : FuncType nat nat bool) f n m :
+Lemma modulus_option_spec1 B C (F : FuncType nat B C) f n m :
   modulus_option F f n m -> n <= m.
 Proof.
 elim => //.
 - move => {n m} n m Hf H Hle. by apply: ltnW.
 Qed.
 
-Lemma modulus_option_spec2 f n m a k :
-  modulus_option (tree2fun (Que a k)) f n m -> a <= m.
+Lemma modulus_option_spec2 B C f n m a k :
+  modulus_option (tree2fun (@Que nat B C a k)) f n m -> a <= m.
 Proof.
 elim => //=.
 move => {n m} n b.
@@ -227,8 +227,8 @@ move => _; rewrite /instr' in E.
 move: E; by case: (a <= n).
 Qed.
 
-Lemma modulus_option_spec3 t f n m :
-  modulus_option (tree2fun t) f n m ->
+Lemma modulus_option_spec3 B C t f n m :
+  modulus_option (@tree2fun nat B C t) f n m ->
   forall p, In p (deps t f) -> fst p <= m.
 Proof.
 move: n m.
@@ -250,7 +250,7 @@ elim: t => [c | a k IH].
     by refine (Modulus_Some H).
 Qed.
 
-Lemma modulus_option_corr (F : FuncType nat nat bool) (Hpure : is_pure F) f g m :
+Lemma modulus_option_corr B C (F : FuncType nat B C) (Hpure : is_pure F) f g m :
   modulus_option F f 0 m ->
   (forall i, i <= m -> f i = g i) ->
   F Id f = F Id g.

@@ -78,3 +78,6 @@ All proofs are formalized by means of the proof assistant Coq.
   - Monadic semantics for simply-typed lambda calculus
 * typedparam.v
   - Parametricity theorem
+
+## Build
+Compiles with Coq 8.4 + Ssreflect 1.4

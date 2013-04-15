@@ -1,9 +1,12 @@
 Purity
 ======
 
-The repository contains a formal Coq development accompanying the paper
-"On Monadic Parametricity of Second-Order Functionals"
-by Andrej Bauer, Martin Hofmann and Aleksandr Karbyshev, FoSSaCS 2013.
+The repository contains a formal Coq development accompanying the papers
+
+1. Andrej Bauer, Martin Hofmann and Aleksandr Karbyshev.
+   On Monadic Parametricity of Second-Order Functionals, FoSSaCS 2013.
+2. Martin Hofmann, Aleksandr Karbyshev, and Helmut Seidl.
+   What is a pure functional?, ICALP 2010.
 
 ## Abstract
 How can one rigorously specify that a given ML functional
@@ -23,9 +26,9 @@ All proofs are formalized by means of the proof assistant Coq.
 * firstorder.v
   - Trivial case of purity for the first-order
 * icalpN.v
-  - General case of second-order functionals parametric in state monads [2]
+  - General case of second-order functionals parametric in state monads (ICALP '10)
 * icalp.v
-  - Parametricity in state monads [2]
+  - Parametricity in state monads (ICALP '10)
 * modulus.v
   - Modulus of continuity
 * monads.v
@@ -73,11 +76,5 @@ All proofs are formalized by means of the proof assistant Coq.
 * stuff.v
 * typeddensem.v
   - Monadic semantics for simply-typed lambda calculus
-typedparam.v
+* typedparam.v
   - Parametricity theorem
-
-## Bibliography
-1. Andrej Bauer, Martin Hofmann and Aleksandr Karbyshev.
-   On Monadic Parametricity of Second-Order Functionals, FoSSaCS 2013.
-2. Martin Hofmann, Aleksandr Karbyshev, and Helmut Seidl.
-   What is a pure functional?, ICALP 2010.

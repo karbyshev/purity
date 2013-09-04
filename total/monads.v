@@ -58,7 +58,7 @@ Defined.
 Definition State (S : Type) : monadType.
 exists
   (fun X => S -> X * S)
-  (fun X => fun x s => (x, s))
+  (fun X => fun (x:X) (s:S) => (x, s))
   (fun X Y => fun t f =>
     fun s => let: (x1, s1) := t s in f x1 s1).
 - rewrite /Monad.axiom0; intuition; by apply: functional_extensionality.
@@ -109,7 +109,7 @@ Defined.
 Definition Maybe : monadType.
 exists
   (fun X => option X)
-  (fun X => fun x => Some x)
+  (fun X => fun (x:X) => Some x)
   (fun X Y => fun t f =>
                 match t with
                   | None => None

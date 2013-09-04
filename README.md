@@ -80,4 +80,4 @@ All proofs are formalized by means of the proof assistant Coq.
   - Parametricity theorem
 
 ## Build
-Compiles with Coq 8.4 + Ssreflect 1.4
+Compiles with Coq 8.4pl2 + Ssreflect 1.4
